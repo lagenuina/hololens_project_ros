@@ -1,0 +1,33 @@
+<launch>
+
+  <!-- Intel Realsense drivers with image undistortion for Azure Spatial Anchors  -->
+  <include file="$(find asa_ros)/launch/intel_camera.launch" />
+
+  <node pkg="tf2_ros" type="static_transform_publisher" name="realsense_tf" args="0 0 -0.16 -1 0 0 0 laser_link camera_link" />
+
+  <!-- Simple republishing script to publish information from /tf as geometry_msgs/TransfromStamped. -->
+  <node pkg="holo_project" type="tf_transform.py" name="tf_transform">
+    <param name="parent_frame" value="anchor_rot" />
+    <param name="child_frame" value="odom" />
+  </node>`
+
+  <!-- Slam Gmapping from the laser scanner.   -->
+  <!-- <include file="$(find gmapping)/launch/slam_gmapping_pr2.launch"/> -->
+
+  <!--Launch ROS-TCP Connector -->
+  <arg name="tcp_ip" default="0.0.0.0"/>
+  <arg name="tcp_port" default="10000"/>
+  <node name="unity_endpoint" pkg="ros_tcp_endpoint" type="default_server_endpoint.py" output="screen">
+      <param name="tcp_ip" type="string" value="$(arg tcp_ip)"/>
+      <param name="tcp_port" type="int" value="$(arg tcp_port)"/>
+  </node>
+
+  <node pkg="tf2_ros" type="static_transform_publisher" name="kortex" args="-0.17 -0.12 0.9 0.271 0.271 -0.653 0.653 base_link kortex/base_link" />
+
+  <!-- Azure Spatial Anchors -->
+  <!-- <include file="$(find asa_ros)/launch/asa_ros.launch">
+    <arg name="anchor_frame_id" value="anchor" />
+    <param name="anchor_id" value="$(arg anchor_id)" />
+  </include> -->
+  
+</launch>

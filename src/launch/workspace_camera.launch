@@ -1,0 +1,62 @@
+<?xml version="1.0"?>
+<launch>=
+    <arg 
+    name="serial_number_workspace" 
+    default="244622072883"/>
+
+    <arg 
+    name="serial_number_chest" 
+    default="242222071812"/>
+
+    <group ns="/workspace_cam">
+
+    <include file="$(find realsense2_camera)/launch/rs_camera.launch" >
+    <param
+    name="serial_no"
+    value="$(arg serial_number_workspace)"/>
+
+    <param 
+    name="color_fps" 
+    default="15"/>
+
+    <param 
+    name="depth_fps" 
+    default="15"/>
+
+    </include>
+    </group>
+
+
+    <group ns="/chest_cam">
+
+    <include file="$(find realsense2_camera)/launch/rs_camera.launch" >
+    <param
+    name="serial_no"
+    value="$(arg serial_number_chest)"/>
+
+    <param 
+    name="color_fps" 
+    default="15"/>
+
+    <param 
+    name="depth_fps" 
+    default="15"/>
+
+    </include>
+    </group>
+
+    <!-- <node 
+    pkg="holo_project" 
+    type="object_tracker.py" 
+    name="interface" 
+    output="screen">
+    </node>
+
+    <node 
+    pkg="holo_project" 
+    type="rh_interface.py" 
+    name="rh_interface" 
+    output="screen">
+    </node> -->
+
+</launch>

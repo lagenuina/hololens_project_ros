@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<launch>=
+    <!-- <arg 
+    name="serial_number" 
+    default="827112071396"/>
+
+    <group ns="/workspace_cam">
+
+    <include file="$(find realsense2_camera)/launch/rs_camera.launch" >
+    <param
+    name="serial_no"
+    value="$(arg serial_number)"/>
+    </include>
+    </group> -->
+
+    <node 
+    pkg="holo_project" 
+    type="object_tracker.py" 
+    name="interface" 
+    output="screen">
+    </node>
+
+    <node 
+    pkg="holo_project" 
+    type="rh_interface.py" 
+    name="rh_interface" 
+    output="screen">
+    </node>
+
+</launch>
