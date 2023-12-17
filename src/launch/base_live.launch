@@ -3,7 +3,10 @@
   <!-- Intel Realsense drivers with image undistortion for Azure Spatial Anchors  -->
   <include file="$(find asa_ros)/launch/intel_camera.launch" />
 
-  <node pkg="tf2_ros" type="static_transform_publisher" name="realsense_tf" args="0 0 -0.16 -1 0 0 0 laser_link camera_link" />
+  <!-- <node pkg="tf2_ros" type="static_transform_publisher" name="realsense_tf" args="0 0 -0.16 -1 0 0 0 laser_link camera_link" /> -->
+
+
+  <node pkg="tf2_ros" type="static_transform_publisher" name="realsense_tf" args="0.05 0.00 1.075 0 0 0 1 base_link camera_link" />
 
   <!-- Simple republishing script to publish information from /tf as geometry_msgs/TransfromStamped. -->
   <node pkg="holo_project" type="tf_transform.py" name="tf_transform">

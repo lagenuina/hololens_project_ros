@@ -7,9 +7,10 @@ import numpy as np
 from cv_bridge import CvBridge, CvBridgeError
 from geometry_msgs.msg import (Pose, Point, Quaternion)
 
+import tf
 from datetime import datetime
 from holo_project.msg import TargetInfo
-from Scripts.srv import UpdateState, ItemPositionFOV
+from Scripts.srv import UpdateState, ItemPositionFOV, ConvertTargetPosition, BoolUpdate
 
 
 class Ar:
@@ -20,6 +21,9 @@ class Ar:
 
         self.bridge = CvBridge()
         self.rate = rospy.Rate(5)
+
+        self.listener = tf.TransformListener()
+        self.br = tf.TransformBroadcaster()
 
         self.image = None
         # Create an ArUco dictionary and detector parameters
@@ -32,7 +36,8 @@ class Ar:
             self.aruco_params,
         )
         self.marker_size = 0.02
-
+        self.in_box = False
+        self.previous_marker_id = None
         self.marker_id = None
         self.expiration = None
         self.center_x = 0
@@ -44,16 +49,25 @@ class Ar:
         self.__detected_markers_world = {}
         self.__detected_markers_corners = {}
 
-        self.box_ids = [10, 11, 12, 13]
+        self.box_ids = [20, 21, 22]
 
         # Camera calibration parameters (replace with your actual values)
+        # self.camera_matrix = np.array(
+        #     [
+        #         [909.1905517578125, 0.0, 644.7723999023438], 
+        #         [0.0, 908.4768676757812, 377.5361633300781], 
+        #         [0.0, 0.0, 1.0],
+        #     ]
+        # )
+
         self.camera_matrix = np.array(
-            [
-                [909.1905517578125, 0.0, 644.7723999023438], 
-                [0.0, 908.4768676757812, 377.5361633300781], 
-                [0.0, 0.0, 1.0],
-            ]
+        [
+            [605.3272705078125, 0.0, 312.21490478515625], 
+            [0.0, 605.3390502929688, 253.79823303222656], 
+            [0.0, 0.0, 1.0],
+        ]
         )
+
         self.dist_coeffs = np.array([0, 0, 0, 0, 0])
 
         # Subscribers
@@ -70,7 +84,7 @@ class Ar:
         # ),
 
         rospy.Subscriber(
-            '/workspace_cam/camera/color/image_raw',
+            '/chest_cam/camera/color/image_raw',
             Image,
             self.image_callback,
         ),
@@ -108,12 +122,36 @@ class Ar:
             UpdateState,
         )
 
+        # self.pause_task_service = rospy.ServiceProxy(
+        #     '/pause_task_service',
+        #     UpdateState,
+        # )
+
+        self.update_target_service = rospy.ServiceProxy(
+            '/update_target',
+            BoolUpdate,
+        )
+        
+        self.change_task_state_service = rospy.ServiceProxy(
+            '/change_task_state_service',
+            UpdateState,
+        )
+
+        self.convert_target_service = rospy.ServiceProxy(
+            '/from_chest_to_anchor', ConvertTargetPosition,
+        )
+
     def resume_task(self, request):
 
         print("Task resumed.")
         self.robot_state = 0
-        self.remote_help_service(0)
+
+        if self.in_box:
+            self.update_target_service(True)
+            self.in_box = False
         
+        self.remote_help_service(0)
+
         return True
 
     def apply_low_pass_filter(self, current_position, marker_id, alpha):
@@ -138,9 +176,9 @@ class Ar:
         self.expiration = message.expiration
 
         if self.marker_id in self.box_ids:
-            self.marker_size = 0.05
+            self.in_box = True
         else:
-            self.marker_size = 0.02
+            self.in_box = False
 
     def image_callback(self, data):
 
@@ -160,7 +198,7 @@ class Ar:
 
         if ids is not None:
             for i in range(len(ids)):
-
+                
                 self.__detected_markers_corners[ids[i][0]] = corners[i]
                 # Calculate World position ID
                 rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(
@@ -170,27 +208,27 @@ class Ar:
                     self.dist_coeffs,
                 )
 
-                # print(tvecs)
-                # print("Detected")
-                # print(corners[i])
-                # print(self.marker_size)
-                # print(self.camera_matrix)
-                # print(self.dist_coeffs)
-
+                # print(ids[i], marker_size)
                 ret = rotate_marker_center(rvecs, self.marker_size, tvecs)
 
+                position_target = Float32MultiArray()
+                position_target.data = [ret[0], ret[1], ret[2] + 0.05]
+
+                target = self.convert_target_service(position_target)
+                
                 # Apply the low-pass filter
                 filtered_position = self.apply_low_pass_filter(
-                    ret,
+                    np.array(target.fromanchor.data),
                     ids[i][0],
                     alpha=0.1,
                 )
-
+                
                 # Store the position in the dictionary
                 self.__detected_markers_world[ids[i][0]] = filtered_position
-
+                
         self.draw_ar()
 
+        # print(self.__detected_markers_world)
         # cv2.imshow("Image", self.image)
         cv2.waitKey(3)
 
@@ -216,16 +254,18 @@ class Ar:
                 closest_marker_id = marker_id
                 closest_marker_distance = min_distance
                 closest_marker_corners = corners
+        
+        # print(closest_marker_id, closest_marker_distance)
 
         if closest_marker_id is not None:
-
             # Calculate the corners of the rectangle with the same side lengths, centered at [center_x, center_y]
-            half_width = (np.abs(closest_marker_corners[0][0][0] - closest_marker_corners[0][3][0])) / 2
-
-            corners_target = np.array([[[center[0] + half_width, center[1] - half_width],
+            half_width = (np.abs(closest_marker_corners[0][0][0] - closest_marker_corners[0][2][0])) / 2
+ 
+            corners_target = np.array([[[center[0] - half_width, center[1] - half_width],
+                [center[0] + half_width, center[1] - half_width],
                 [center[0] + half_width, center[1] + half_width],
                 [center[0] - half_width, center[1] + half_width],
-                [center[0] - half_width, center[1] - half_width]]], dtype=np.float32)
+                ]], dtype=np.float32)
 
             # Calculate World position ID
             rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(
@@ -237,15 +277,21 @@ class Ar:
 
             ret = rotate_marker_center(rvecs, self.marker_size, tvecs)
 
+            position_target = Float32MultiArray()
+            position_target.data = ret
+
+            target = self.convert_target_service(position_target)
+            target = np.array(target.fromanchor.data)
+
             target_position_world = Point()
             target_position_world.x = np.round(
-                ret[0], 2
+                target[0], 2
             )
             target_position_world.y = np.round(
-                ret[1], 2
+                target[1], 2
             )
             target_position_world.z = np.round(
-                ret[2], 2
+                target[2], 2
             )
             self.__target_camera_pub.publish(target_position_world)
 
@@ -253,6 +299,7 @@ class Ar:
 
     def draw_ar(self):
 
+        print(self.__detected_markers_world)
         # If marker is detected
         if self.marker_id in self.__detected_markers_corners:
 
@@ -283,6 +330,11 @@ class Ar:
             )
             self.__target_camera_pub.publish(target_position_world)
 
+            if self.marker_id != self.previous_marker_id:
+
+                self.change_task_state_service(0)
+                self.previous_marker_id = self.marker_id
+
         # If marker is not detected
         else:
             if self.marker_id is not None:
@@ -291,6 +343,12 @@ class Ar:
 
                     # Call service with help request
                     self.remote_help_service(1)
+
+                    if self.marker_id != self.previous_marker_id:
+                        self.change_task_state_service(1)
+                        self.previous_marker_id = self.marker_id
+
+                    # self.change_task_state_service(1)
 
                     self.robot_state = 1
 
@@ -304,9 +362,13 @@ class Ar:
         self.__target_position_frame_pub.publish(target_position_frame)
 
     def check_target_size(self):
-        if self.marker_size == 0.05:
-            pass
+        
+        if self.in_box:
+            
+            # self.__detected_markers_world[self.marker_id][2] -= 0.15
             # Send help
+            self.remote_help_service(3)
+            self.change_task_state_service(3)
 
     def check_expiration_date(self):
 
@@ -326,6 +388,7 @@ class Ar:
             # )
             if self.robot_state == 0:
                 self.remote_help_service(2)
+                self.change_task_state_service(2)
                 self.robot_state = 2
 
 

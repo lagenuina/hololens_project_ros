@@ -1,14 +1,12 @@
 #!/usr/bin/env python
 import rospy
-from std_msgs.msg import Int16, Float32MultiArray
+from std_msgs.msg import Float32MultiArray
 from sensor_msgs.msg import Image
 import cv2
-import numpy as np
 from cv_bridge import CvBridge, CvBridgeError
-from geometry_msgs.msg import (Pose, Point, Quaternion)
-from pynput import keyboard, mouse
+from pynput import keyboard
 from Scripts.msg import TargetInfo
-from Scripts.srv import UpdateState, ItemPositionFOV, TrackingState
+from Scripts.srv import UpdateState, ItemPositionFOV
 
 
 class RhInterface:
@@ -58,7 +56,7 @@ class RhInterface:
 
         # Subscribers
         rospy.Subscriber(
-            '/workspace_cam/camera/color/image_raw',
+            '/chest_cam/camera/color/image_raw',
             Image,
             self.image_callback,
         ),
@@ -98,9 +96,9 @@ class RhInterface:
             ItemPositionFOV,
         )
 
-        self.tracking_state_service = rospy.ServiceProxy(
-            '/tracking_state_service',
-            TrackingState,
+        self.change_task_state_service = rospy.ServiceProxy(
+            '/change_task_state_service',
+            UpdateState,
         )
     
     def __target_identifier_callback(self, message):
@@ -131,7 +129,8 @@ class RhInterface:
                     # Send to robot
                     self.rh_help = False
                     self.resume_task_service(0)
-                    self.tracking_state_service(True)
+                    
+                    self.change_task_state_service(0)
 
                     # Update position
 
@@ -164,9 +163,14 @@ class RhInterface:
         )
 
     def help_request(self, request):
-
-        self.rh_help = True
+        print(request.state)
         self.request_id = request.state
+
+        if self.request_id == 0:
+            self.rh_help = False
+            self.change_task_state_service(0)
+        else:
+            self.rh_help = True
 
         self.state = 0
         return True
@@ -232,6 +236,11 @@ class RhInterface:
             if self.request_id == 2:
 
                 self.popup_message(2)
+
+            # Object is too big
+            if self.request_id == 3:
+
+                self.popup_message(3)
 
             if (self.rect_start_x is not None) and (self.rect_end_x is not None):
                 cv2.rectangle(
@@ -317,6 +326,20 @@ class RhInterface:
                 "{}/{}".format(self.month, self.year), (0, 0, 0)
             )
 
+        if case == 3:
+            self.add_text(
+                (self.rect_position[0] + 5, self.rect_position[1] + 50),
+                "{}".format(self.medicine_name), (0, 0, 0)
+            )
+            self.add_text(
+                (self.rect_position[0] + 5, self.rect_position[1] + 75),
+                "is in the box.".format(self.marker_id), (0, 0, 0)
+            )
+            self.add_text(
+                (self.rect_position[0] + 5, self.rect_position[1] + 100),
+                "", (0, 0, 0)
+            )
+
     def add_text(self, position, text, color):
 
         # Write the text on the image
@@ -331,6 +354,8 @@ class RhInterface:
             if key.char == 'a':
                 self.rh_help = False
                 self.local_help_service(self.request_id)
+                print("yo!")
+                print(self.request_id)
 
             if key.char == 'q':
                 self.state = 0

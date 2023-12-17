@@ -4,7 +4,7 @@
     name="serial_number_workspace" 
     default="244622072883"/>
 
-    <arg 
+    <!-- <arg 
     name="serial_number_chest" 
     default="242222071812"/>
 
@@ -24,7 +24,7 @@
     default="15"/>
 
     </include>
-    </group>
+    </group> -->
 
 
     <group ns="/chest_cam">

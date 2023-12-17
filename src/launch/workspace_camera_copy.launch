@@ -27,4 +27,11 @@
     output="screen">
     </node>
 
+    <node 
+    pkg="holo_project" 
+    type="read_from_csv.py" 
+    name="csv_reader_node" 
+    output="screen">
+    </node>
+
 </launch>
