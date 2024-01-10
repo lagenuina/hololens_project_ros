@@ -100,9 +100,9 @@ class RhInterface:
             '/change_task_state_service',
             UpdateState,
         )
-    
+
     def __target_identifier_callback(self, message):
-        
+
         self.marker_id = message.id
         self.medicine_name = message.name
         self.month = message.expiration[:2]
@@ -121,7 +121,10 @@ class RhInterface:
             if self.state == 2:
 
                 center = Float32MultiArray()
-                center.data = [(self.rect_end_x + self.rect_start_x)/2, (self.rect_end_y + self.rect_start_y)/2]
+                center.data = [
+                    (self.rect_end_x + self.rect_start_x) / 2,
+                    (self.rect_end_y + self.rect_start_y) / 2
+                ]
 
                 self.position_fov_service(center)
 
@@ -129,8 +132,8 @@ class RhInterface:
                     # Send to robot
                     self.rh_help = False
                     self.resume_task_service(0)
-                    
-                    self.change_task_state_service(0)
+
+                    # self.change_task_state_service(0)
 
                     # Update position
 
@@ -141,12 +144,14 @@ class RhInterface:
                 self.state = 0
 
         elif event == cv2.EVENT_LBUTTONUP and self.state == 1:
-            
+
             self.rect_end_x = x
             self.rect_end_y = y
 
             offset = 10
-            self.button_start_x = self.rect_start_x + (self.rect_end_x - self.rect_start_x) + offset
+            self.button_start_x = self.rect_start_x + (
+                self.rect_end_x - self.rect_start_x
+            ) + offset
             self.button_start_y = self.rect_start_y
 
             self.state = 2
@@ -156,10 +161,10 @@ class RhInterface:
             self.rect_end_y = y
 
     def is_mouse_inside_button(self, mouse_x, mouse_y, button_coords):
-        
+
         return (
-            button_coords[0][0] < mouse_x < button_coords[1][0] and
-            button_coords[0][1] < mouse_y < button_coords[1][1]
+            button_coords[0][0] < mouse_x < button_coords[1][0]
+            and button_coords[0][1] < mouse_y < button_coords[1][1]
         )
 
     def help_request(self, request):
@@ -242,40 +247,60 @@ class RhInterface:
 
                 self.popup_message(3)
 
-            if (self.rect_start_x is not None) and (self.rect_end_x is not None):
+            if (self.rect_start_x
+                is not None) and (self.rect_end_x is not None):
                 cv2.rectangle(
                     self.image, (self.rect_start_x, self.rect_start_y),
                     (self.rect_end_x, self.rect_end_y), (0, 255, 0), 2
                 )
 
             if self.state == 2 and (self.button_start_x is not None):
-                
-                button_rectangle = [(self.button_start_x, self.button_start_y), (self.button_start_x + 120, self.button_start_y + 60)]
-                
-                self.add_buttons(button_rectangle)
 
+                button_rectangle = [
+                    (self.button_start_x, self.button_start_y),
+                    (self.button_start_x + 120, self.button_start_y + 60)
+                ]
+
+                self.add_buttons(button_rectangle)
 
     def add_buttons(self, button_rectangle):
 
         cv2.rectangle(
-            self.image, button_rectangle[0],
-            button_rectangle[1], (211, 211, 211), thickness=cv2.FILLED,
+            self.image,
+            button_rectangle[0],
+            button_rectangle[1],
+            (211, 211, 211),
+            thickness=cv2.FILLED,
         )
 
-        self.button_one = [button_rectangle[0], (button_rectangle[1][0], button_rectangle[0][1] + int((button_rectangle[1][1] - button_rectangle[0][1])/2))]
+        self.button_one = [
+            button_rectangle[0],
+            (
+                button_rectangle[1][0], button_rectangle[0][1]
+                + int((button_rectangle[1][1] - button_rectangle[0][1]) / 2)
+            )
+        ]
         cv2.rectangle(
-            self.image, self.button_one[0],
-            self.button_one[1], (0, 0, 0), 1
+            self.image, self.button_one[0], self.button_one[1], (0, 0, 0), 1
         )
 
-        self.button_two = [(self.button_one[0][0], self.button_one[1][1]), button_rectangle[1]]
+        self.button_two = [
+            (self.button_one[0][0], self.button_one[1][1]), button_rectangle[1]
+        ]
         cv2.rectangle(
-            self.image, self.button_two[0],
-            self.button_two[1], (0, 0, 0), 1
+            self.image, self.button_two[0], self.button_two[1], (0, 0, 0), 1
         )
 
-        cv2.putText(self.image, "Send to robot", (button_rectangle[0][0] + 5, button_rectangle[0][1] + 20), self.font, 0.5, (0, 0, 0), 1)
-        cv2.putText(self.image, "Send to LH", (button_rectangle[0][0] + 5, button_rectangle[0][1] + 50), self.font, 0.5, (0, 0, 0), 1)
+        cv2.putText(
+            self.image, "Send to robot",
+            (button_rectangle[0][0] + 5, button_rectangle[0][1] + 20),
+            self.font, 0.5, (0, 0, 0), 1
+        )
+        cv2.putText(
+            self.image, "Send to LH",
+            (button_rectangle[0][0] + 5, button_rectangle[0][1] + 50),
+            self.font, 0.5, (0, 0, 0), 1
+        )
 
     def popup_message(self, case):
 
@@ -336,8 +361,8 @@ class RhInterface:
                 "is in the box.".format(self.marker_id), (0, 0, 0)
             )
             self.add_text(
-                (self.rect_position[0] + 5, self.rect_position[1] + 100),
-                "", (0, 0, 0)
+                (self.rect_position[0] + 5, self.rect_position[1] + 100), "",
+                (0, 0, 0)
             )
 
     def add_text(self, position, text, color):

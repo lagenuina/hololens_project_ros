@@ -44,6 +44,7 @@ class Ar:
         self.center_y = 0
 
         self.robot_state = 0  # Running
+        self.new_target_received = False
 
         # Create dictionary to store position of detected markers
         self.__detected_markers_world = {}
@@ -54,18 +55,18 @@ class Ar:
         # Camera calibration parameters (replace with your actual values)
         # self.camera_matrix = np.array(
         #     [
-        #         [909.1905517578125, 0.0, 644.7723999023438], 
-        #         [0.0, 908.4768676757812, 377.5361633300781], 
+        #         [909.1905517578125, 0.0, 644.7723999023438],
+        #         [0.0, 908.4768676757812, 377.5361633300781],
         #         [0.0, 0.0, 1.0],
         #     ]
         # )
 
         self.camera_matrix = np.array(
-        [
-            [605.3272705078125, 0.0, 312.21490478515625], 
-            [0.0, 605.3390502929688, 253.79823303222656], 
-            [0.0, 0.0, 1.0],
-        ]
+            [
+                [605.3272705078125, 0.0, 312.21490478515625],
+                [0.0, 605.3390502929688, 253.79823303222656],
+                [0.0, 0.0, 1.0],
+            ]
         )
 
         self.dist_coeffs = np.array([0, 0, 0, 0, 0])
@@ -131,14 +132,15 @@ class Ar:
             '/update_target',
             BoolUpdate,
         )
-        
+
         self.change_task_state_service = rospy.ServiceProxy(
             '/change_task_state_service',
             UpdateState,
         )
 
         self.convert_target_service = rospy.ServiceProxy(
-            '/from_chest_to_anchor', ConvertTargetPosition,
+            '/from_chest_to_anchor',
+            ConvertTargetPosition,
         )
 
     def resume_task(self, request):
@@ -148,8 +150,11 @@ class Ar:
 
         if self.in_box:
             self.update_target_service(True)
-            self.in_box = False
-        
+        elif self.marker_id in self.__detected_markers_world:
+            self.change_task_state_service(0)
+        else:
+            self.update_target_service(True)
+
         self.remote_help_service(0)
 
         return True
@@ -180,6 +185,11 @@ class Ar:
         else:
             self.in_box = False
 
+        if self.marker_id != self.previous_marker_id:
+
+            self.new_target_received = True
+            self.previous_marker_id = self.marker_id
+
     def image_callback(self, data):
 
         try:
@@ -198,7 +208,7 @@ class Ar:
 
         if ids is not None:
             for i in range(len(ids)):
-                
+
                 self.__detected_markers_corners[ids[i][0]] = corners[i]
                 # Calculate World position ID
                 rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(
@@ -215,17 +225,17 @@ class Ar:
                 position_target.data = [ret[0], ret[1], ret[2] + 0.05]
 
                 target = self.convert_target_service(position_target)
-                
+
                 # Apply the low-pass filter
                 filtered_position = self.apply_low_pass_filter(
                     np.array(target.fromanchor.data),
                     ids[i][0],
                     alpha=0.1,
                 )
-                
+
                 # Store the position in the dictionary
                 self.__detected_markers_world[ids[i][0]] = filtered_position
-                
+
         self.draw_ar()
 
         # print(self.__detected_markers_world)
@@ -233,7 +243,7 @@ class Ar:
         cv2.waitKey(3)
 
     def calculate_world_position(self, request):
-        
+
         closest_marker_id = None
         closest_marker_distance = np.inf
         closest_marker_corners = None
@@ -246,26 +256,42 @@ class Ar:
 
         # Iterate through detected markers
         for marker_id, corners in self.__detected_markers_corners.items():
-            center_marker = [(corners[0][2][0] + corners[0][0][0])/2, (corners[0][2][1] + corners[0][0][1])/2]
-            min_distance = np.linalg.norm(np.array(center) - np.array(center_marker))
-            
+            center_marker = [
+                (corners[0][2][0] + corners[0][0][0]) / 2,
+                (corners[0][2][1] + corners[0][0][1]) / 2
+            ]
+            min_distance = np.linalg.norm(
+                np.array(center) - np.array(center_marker)
+            )
+
             # Check if the current marker is closer than the previous closest marker
             if min_distance < closest_marker_distance:
                 closest_marker_id = marker_id
                 closest_marker_distance = min_distance
                 closest_marker_corners = corners
-        
+
         # print(closest_marker_id, closest_marker_distance)
 
         if closest_marker_id is not None:
             # Calculate the corners of the rectangle with the same side lengths, centered at [center_x, center_y]
-            half_width = (np.abs(closest_marker_corners[0][0][0] - closest_marker_corners[0][2][0])) / 2
- 
-            corners_target = np.array([[[center[0] - half_width, center[1] - half_width],
-                [center[0] + half_width, center[1] - half_width],
-                [center[0] + half_width, center[1] + half_width],
-                [center[0] - half_width, center[1] + half_width],
-                ]], dtype=np.float32)
+            half_width = (
+                np.abs(
+                    closest_marker_corners[0][0][0]
+                    - closest_marker_corners[0][2][0]
+                )
+            ) / 2
+
+            corners_target = np.array(
+                [
+                    [
+                        [center[0] - half_width, center[1] - half_width],
+                        [center[0] + half_width, center[1] - half_width],
+                        [center[0] + half_width, center[1] + half_width],
+                        [center[0] - half_width, center[1] + half_width],
+                    ]
+                ],
+                dtype=np.float32
+            )
 
             # Calculate World position ID
             rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(
@@ -283,23 +309,23 @@ class Ar:
             target = self.convert_target_service(position_target)
             target = np.array(target.fromanchor.data)
 
-            target_position_world = Point()
-            target_position_world.x = np.round(
-                target[0], 2
-            )
-            target_position_world.y = np.round(
-                target[1], 2
-            )
-            target_position_world.z = np.round(
-                target[2], 2
-            )
-            self.__target_camera_pub.publish(target_position_world)
+            self.__detected_markers_world[self.marker_id] = target
+            self.__detected_markers_corners[self.marker_id] = corners_target
 
+            # target_position_world = Point()
+            # target_position_world.x = np.round(target[0], 2)
+            # target_position_world.y = np.round(target[1], 2)
+            # target_position_world.z = np.round(target[2], 2)
+            # self.__target_camera_pub.publish(target_position_world)
+
+            # print(target_position_world)
         return True
 
     def draw_ar(self):
 
         print(self.__detected_markers_world)
+        target_position_world = Point()
+
         # If marker is detected
         if self.marker_id in self.__detected_markers_corners:
 
@@ -315,10 +341,8 @@ class Ar:
                 )
             )
 
-            self.check_target_size()
-            self.check_expiration_date()
-
-            target_position_world = Point()
+            # self.check_target_size()
+            # self.check_expiration_date()
             target_position_world.x = np.round(
                 self.__detected_markers_world[self.marker_id][0], 2
             )
@@ -328,47 +352,32 @@ class Ar:
             target_position_world.z = np.round(
                 self.__detected_markers_world[self.marker_id][2], 2
             )
-            self.__target_camera_pub.publish(target_position_world)
 
-            if self.marker_id != self.previous_marker_id:
-
-                self.change_task_state_service(0)
-                self.previous_marker_id = self.marker_id
-
-        # If marker is not detected
         else:
-            if self.marker_id is not None:
 
-                if self.robot_state == 0:
-
-                    # Call service with help request
-                    self.remote_help_service(1)
-
-                    if self.marker_id != self.previous_marker_id:
-                        self.change_task_state_service(1)
-                        self.previous_marker_id = self.marker_id
-
-                    # self.change_task_state_service(1)
-
-                    self.robot_state = 1
-
+            if self.robot_state != 0:
                 self.center_x = 0
                 self.center_y = 0
 
-                # print("Object not detected!")
+                target_position_world.x = 0
+                target_position_world.y = 0
+                target_position_world.z = 0
+
+        self.__target_camera_pub.publish(target_position_world)
 
         target_position_frame = Float32MultiArray()
         target_position_frame.data = [self.center_x, self.center_y]
         self.__target_position_frame_pub.publish(target_position_frame)
 
-    def check_target_size(self):
-        
-        if self.in_box:
-            
-            # self.__detected_markers_world[self.marker_id][2] -= 0.15
-            # Send help
-            self.remote_help_service(3)
-            self.change_task_state_service(3)
+    # def check_target_size(self):
+
+    #     if self.in_box:
+
+    #         # self.__detected_markers_world[self.marker_id][2] -= 0.15
+    #         # Send help
+    #         self.remote_help_service(3)
+    #         self.change_task_state_service(3)
+    #         self.robot_state = 3
 
     def check_expiration_date(self):
 
@@ -386,10 +395,46 @@ class Ar:
             # print(
             #     f"The provided date {input_date.strftime('%B %Y')} has expired."
             # )
-            if self.robot_state == 0:
-                self.remote_help_service(2)
-                self.change_task_state_service(2)
-                self.robot_state = 2
+            return True
+        else:
+            return False
+
+    def main_loop(self):
+
+        if self.new_target_received:
+
+            if self.marker_id not in self.__detected_markers_corners:
+
+                if self.marker_id is not None:
+                    if self.robot_state == 0:
+
+                        # Call service with help request
+                        self.remote_help_service(1)
+                        self.change_task_state_service(1)
+
+                        self.robot_state = 1
+
+            else:
+
+                # Check target size
+                if self.in_box:
+                    # Send help
+                    self.remote_help_service(3)
+                    self.change_task_state_service(3)
+                    self.robot_state = 3
+
+                # Check expiration date
+                elif self.check_expiration_date():
+
+                    if self.robot_state == 0:
+                        self.remote_help_service(2)
+                        self.change_task_state_service(2)
+                        self.robot_state = 2
+
+                else:
+                    self.change_task_state_service(0)
+
+            self.new_target_received = False
 
 
 def rotate_marker_center(rvec, markersize, tvec=None):
@@ -413,4 +458,5 @@ if __name__ == "__main__":
     ar = Ar()
 
     while not rospy.is_shutdown():
+        ar.main_loop()
         ar.rate.sleep()
