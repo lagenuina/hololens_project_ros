@@ -1,8 +1,9 @@
 #!/usr/bin/env python
 import rospy
 from std_msgs.msg import Float32MultiArray
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import Image, CompressedImage
 import cv2
+import numpy as np
 from cv_bridge import CvBridge, CvBridgeError
 from pynput import keyboard
 from Scripts.msg import TargetInfo
@@ -168,7 +169,7 @@ class RhInterface:
         )
 
     def help_request(self, request):
-        print(request.state)
+        # print(request.state)
         self.request_id = request.state
 
         if self.request_id == 0:
@@ -200,6 +201,7 @@ class RhInterface:
         # cv2.resizeWindow("Interface", screen_width, screen_height)
 
         cv2.imshow("Interface", self.image)
+
         cv2.setMouseCallback("Interface", self.mouse_callback)
         cv2.waitKey(3)
 
@@ -232,21 +234,21 @@ class RhInterface:
                 thickness=2
             )
 
+        # If object is not detected
+        if self.request_id == 1:
+            self.popup_message(1)
+
+        # Medicine is expired
+        if self.request_id == 2:
+
+            self.popup_message(2)
+
+        # Object is too big
+        if self.request_id == 3:
+
+            self.popup_message(3)
+
         if self.rh_help:
-            # If object is not detected
-            if self.request_id == 1:
-                self.popup_message(1)
-
-            # Medicine is expired
-            if self.request_id == 2:
-
-                self.popup_message(2)
-
-            # Object is too big
-            if self.request_id == 3:
-
-                self.popup_message(3)
-
             if (self.rect_start_x
                 is not None) and (self.rect_end_x is not None):
                 cv2.rectangle(
@@ -379,8 +381,8 @@ class RhInterface:
             if key.char == 'a':
                 self.rh_help = False
                 self.local_help_service(self.request_id)
-                print("yo!")
-                print(self.request_id)
+                # print("yo!")
+                # print(self.request_id)
 
             if key.char == 'q':
                 self.state = 0

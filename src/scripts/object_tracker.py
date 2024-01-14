@@ -1,12 +1,13 @@
 #!/usr/bin/env python
 import rospy
-from std_msgs.msg import Int16, Float32MultiArray
-from sensor_msgs.msg import Image
+from std_msgs.msg import Float32MultiArray, Bool, Int32
+from sensor_msgs.msg import Image, CompressedImage
 import cv2
 import numpy as np
 from cv_bridge import CvBridge, CvBridgeError
-from geometry_msgs.msg import (Pose, Point, Quaternion)
+from geometry_msgs.msg import (Point)
 
+from gopher_ros_clearcore.msg import (Position)
 import tf
 from datetime import datetime
 from holo_project.msg import TargetInfo
@@ -35,6 +36,10 @@ class Ar:
             self.aruco_dict,
             self.aruco_params,
         )
+
+        self.on_startup = True
+        self.counter = None
+        self.adjusting_chest = False
         self.marker_size = 0.02
         self.in_box = False
         self.previous_marker_id = None
@@ -85,6 +90,12 @@ class Ar:
         # ),
 
         rospy.Subscriber(
+            '/target_counter',
+            Int32,
+            self.counter_callback,
+        )
+
+        rospy.Subscriber(
             '/chest_cam/camera/color/image_raw',
             Image,
             self.image_callback,
@@ -97,9 +108,21 @@ class Ar:
             queue_size=1,
         )
 
-        self.__target_position_frame_pub = rospy.Publisher(
-            '/workspace_cam/target_position_in_frame',
-            Float32MultiArray,
+        # self.__target_position_frame_pub = rospy.Publisher(
+        #     '/workspace_cam/target_position_in_frame',
+        #     Float32MultiArray,
+        #     queue_size=1,
+        # )
+
+        self.__chest_position = rospy.Publisher(
+            'z_chest_pos',
+            Position,
+            queue_size=1,
+        )
+
+        self.image_pub = rospy.Publisher(
+            "/chest_cam/remote_interface",
+            Image,
             queue_size=1,
         )
 
@@ -115,6 +138,12 @@ class Ar:
             '/calculate_world_position_service',
             ItemPositionFOV,
             self.calculate_world_position,
+        )
+
+        self.remote_service = rospy.Service(
+            '/local_request',
+            UpdateState,
+            self.local_help,
         )
 
         # Service subscriber
@@ -143,6 +172,17 @@ class Ar:
             ConvertTargetPosition,
         )
 
+        self.local_help_service = rospy.ServiceProxy(
+            '/local_help_request_service',
+            UpdateState,
+        )
+
+    def local_help(self, request):
+
+        self.rh_help = False
+        self.local_help_service(request)
+        return True
+
     def resume_task(self, request):
 
         print("Task resumed.")
@@ -158,6 +198,10 @@ class Ar:
         self.remote_help_service(0)
 
         return True
+
+    def counter_callback(self, message):
+
+        self.counter = message.data
 
     def apply_low_pass_filter(self, current_position, marker_id, alpha):
 
@@ -193,6 +237,7 @@ class Ar:
     def image_callback(self, data):
 
         try:
+
             self.image = self.bridge.imgmsg_to_cv2(data, "bgr8")
 
             self.width = data.width
@@ -201,46 +246,47 @@ class Ar:
         except CvBridgeError as e:
             print(e)
 
-        # self.image = cv2.rotate(self.image, cv2.ROTATE_90_CLOCKWISE)
+        if not self.adjusting_chest:
 
-        # Detect ArUco markers
-        corners, ids, _ = self.aruco_detector.detectMarkers(self.image)
+            ("Detecting...")
 
-        if ids is not None:
-            for i in range(len(ids)):
+            # Detect ArUco markers
+            corners, ids, _ = self.aruco_detector.detectMarkers(self.image)
 
-                self.__detected_markers_corners[ids[i][0]] = corners[i]
-                # Calculate World position ID
-                rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(
-                    corners[i],
-                    self.marker_size,
-                    self.camera_matrix,
-                    self.dist_coeffs,
-                )
+            if ids is not None:
+                for i in range(len(ids)):
 
-                # print(ids[i], marker_size)
-                ret = rotate_marker_center(rvecs, self.marker_size, tvecs)
+                    self.__detected_markers_corners[ids[i][0]] = corners[i]
 
-                position_target = Float32MultiArray()
-                position_target.data = [ret[0], ret[1], ret[2] + 0.05]
+                    # Calculate World position ID
+                    rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(
+                        corners[i],
+                        self.marker_size,
+                        self.camera_matrix,
+                        self.dist_coeffs,
+                    )
 
-                target = self.convert_target_service(position_target)
+                    # print(ids[i], marker_size)
+                    ret = rotate_marker_center(rvecs, self.marker_size, tvecs)
 
-                # Apply the low-pass filter
-                filtered_position = self.apply_low_pass_filter(
-                    np.array(target.fromanchor.data),
-                    ids[i][0],
-                    alpha=0.1,
-                )
+                    position_target = Float32MultiArray()
+                    position_target.data = [ret[0], ret[1], ret[2] + 0.05]
 
-                # Store the position in the dictionary
-                self.__detected_markers_world[ids[i][0]] = filtered_position
+                    target = self.convert_target_service(position_target)
+
+                    # Apply the low-pass filter
+                    filtered_position = self.apply_low_pass_filter(
+                        np.array(target.fromanchor.data),
+                        ids[i][0],
+                        alpha=0.1,
+                    )
+
+                    # Store the position in the dictionary
+                    self.__detected_markers_world[ids[i][0]] = filtered_position
 
         self.draw_ar()
 
-        # print(self.__detected_markers_world)
-        # cv2.imshow("Image", self.image)
-        cv2.waitKey(3)
+        # cv2.waitKey(3)
 
     def calculate_world_position(self, request):
 
@@ -323,7 +369,8 @@ class Ar:
 
     def draw_ar(self):
 
-        print(self.__detected_markers_world)
+        # print(self.__detected_markers_world.keys())
+        # print(self.__detected_markers_world)
         target_position_world = Point()
 
         # If marker is detected
@@ -364,10 +411,6 @@ class Ar:
                 target_position_world.z = 0
 
         self.__target_camera_pub.publish(target_position_world)
-
-        target_position_frame = Float32MultiArray()
-        target_position_frame.data = [self.center_x, self.center_y]
-        self.__target_position_frame_pub.publish(target_position_frame)
 
     # def check_target_size(self):
 
@@ -436,6 +479,56 @@ class Ar:
 
             self.new_target_received = False
 
+        if (self.center_x == 0) and (self.center_y == 0):
+            self.target_detected = False
+        else:
+            self.target_detected = True
+
+        if self.image is not None:
+            self.image = self.image.copy()
+
+            if self.target_detected:
+                cv2.circle(
+                    self.image, (self.center_x, self.center_y),
+                    radius=30,
+                    color=(0, 255, 0),
+                    thickness=2
+                )
+
+            # image = CompressedImage()
+            # # image.header = rospy.Time.now()
+            # image.format = "jpeg"
+            # image.data = np.array(cv2.imencode('.jpg', self.image)[1]).tobytes()
+
+            # self.image_pub.publish(image)
+            image = Image()
+            image.data = np.array(cv2.imencode('.png', self.image)[1]).tobytes()
+
+            self.image_pub.publish(image)
+
+    # def adjust_chest(self):
+
+    #     # if self.counter == -1 and self.on_startup:
+    #     if self.counter == -1 and self.on_startup:
+
+    #         self.adjusting_chest = True
+
+    #         chest_pos = Position()
+    #         chest_pos.position = 200
+    #         chest_pos.velocity = 1.0
+    #         self.__chest_position.publish(chest_pos)
+
+    #         self.on_startup = False
+
+    #         print("Before")
+
+    #         rospy.sleep(5)
+
+    #         print("Update target")
+    #         self.adjusting_chest = False
+
+    #         self.update_target_service(True)
+
 
 def rotate_marker_center(rvec, markersize, tvec=None):
     mhalf = markersize / 2.0
@@ -459,4 +552,5 @@ if __name__ == "__main__":
 
     while not rospy.is_shutdown():
         ar.main_loop()
+        # ar.adjust_chest()
         ar.rate.sleep()
