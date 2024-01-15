@@ -55,7 +55,7 @@ class FileReader:
         #     queue_size=1,
         # )
 
-        self.counter = -1
+        self.counter = -2
         self.update = False
 
         self.chest_position = 440

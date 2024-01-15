@@ -11,7 +11,7 @@ from gopher_ros_clearcore.msg import (Position)
 import tf
 from datetime import datetime
 from holo_project.msg import TargetInfo
-from Scripts.srv import UpdateState, ItemPositionFOV, ConvertTargetPosition, BoolUpdate
+from Scripts.srv import UpdateState, UpdateChest, ItemPositionFOV, ConvertTargetPosition, BoolUpdate
 
 
 class Ar:
@@ -37,6 +37,7 @@ class Ar:
             self.aruco_params,
         )
 
+        self.target_detected = False
         self.on_startup = True
         self.counter = None
         self.adjusting_chest = False
@@ -48,6 +49,7 @@ class Ar:
         self.center_x = 0
         self.center_y = 0
 
+        self.chest_position = 440.0
         self.robot_state = 0  # Running
         self.new_target_received = False
 
@@ -133,6 +135,12 @@ class Ar:
             self.resume_task,
         )
 
+        self.update_chest_service = rospy.Service(
+            '/update_chest',
+            UpdateChest,
+            self.update_chest,
+        )
+
         # Service provider
         self.position_fov_service = rospy.Service(
             '/calculate_world_position_service',
@@ -182,6 +190,23 @@ class Ar:
         self.rh_help = False
         self.local_help_service(request)
         return True
+
+    def update_chest(self, request):
+
+        if self.__detected_markers_world[self.marker_id][1] > 0.25:
+            if self.chest_position == 200:
+                self.move_chest(440.0)
+                return int(440)
+            elif self.chest_position == 440:
+                self.move_chest(200.0)
+                return int(200)
+
+        elif self.__detected_markers_world[
+            self.marker_id][1] < 0.25 and self.chest_position == 440:
+            self.move_chest(200.0)
+            return int(200)
+
+        return int(self.chest_position)
 
     def resume_task(self, request):
 
@@ -248,15 +273,13 @@ class Ar:
 
         if not self.adjusting_chest:
 
-            ("Detecting...")
-
             # Detect ArUco markers
             corners, ids, _ = self.aruco_detector.detectMarkers(self.image)
 
             if ids is not None:
                 for i in range(len(ids)):
 
-                    self.__detected_markers_corners[ids[i][0]] = corners[i]
+                    # self.__detected_markers_corners[ids[i][0]] = corners[i]
 
                     # Calculate World position ID
                     rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(
@@ -300,8 +323,17 @@ class Ar:
         closest_marker_distance = float('inf')
         # closest_marker_corners = None
 
+        corners, ids, _ = self.aruco_detector.detectMarkers(self.image)
+
+        detected_markers_corners = {}
+
+        if ids is not None:
+            for i in range(len(ids)):
+
+                detected_markers_corners[ids[i][0]] = corners[i]
+
         # Iterate through detected markers
-        for marker_id, corners in self.__detected_markers_corners.items():
+        for marker_id, corners in detected_markers_corners.items():
             center_marker = [
                 (corners[0][2][0] + corners[0][0][0]) / 2,
                 (corners[0][2][1] + corners[0][0][1]) / 2
@@ -356,7 +388,7 @@ class Ar:
             target = np.array(target.fromanchor.data)
 
             self.__detected_markers_world[self.marker_id] = target
-            self.__detected_markers_corners[self.marker_id] = corners_target
+            # self.__detected_markers_corners[self.marker_id] = corners_target
 
             # target_position_world = Point()
             # target_position_world.x = np.round(target[0], 2)
@@ -370,26 +402,30 @@ class Ar:
     def draw_ar(self):
 
         # print(self.__detected_markers_world.keys())
-        # print(self.__detected_markers_world)
+        print(self.__detected_markers_world)
         target_position_world = Point()
 
         # If marker is detected
-        if self.marker_id in self.__detected_markers_corners:
+        if self.marker_id in self.__detected_markers_world:
 
-            # Calculate the center of the marker
-            self.center_x = int(
-                np.mean(
-                    self.__detected_markers_corners[self.marker_id][0][:, 0]
-                )
-            )
-            self.center_y = int(
-                np.mean(
-                    self.__detected_markers_corners[self.marker_id][0][:, 1]
-                )
-            )
+            corners, ids, _ = self.aruco_detector.detectMarkers(self.image)
 
-            # self.check_target_size()
-            # self.check_expiration_date()
+            if ids is not None and self.marker_id in ids:
+
+                for i in range(len(ids)):
+
+                    if ids[i] == self.marker_id:
+
+                        self.center_x = int(np.mean(corners[i][0][:, 0]))
+                        self.center_y = int(np.mean(corners[i][0][:, 1]))
+
+                self.target_detected = True
+            else:
+                self.center_x = 0
+                self.center_y = 0
+
+                self.target_detected = False
+
             target_position_world.x = np.round(
                 self.__detected_markers_world[self.marker_id][0], 2
             )
@@ -403,9 +439,8 @@ class Ar:
         else:
 
             if self.robot_state != 0:
-                self.center_x = 0
-                self.center_y = 0
-
+                # self.center_x = 0
+                # self.center_y = 0
                 target_position_world.x = 0
                 target_position_world.y = 0
                 target_position_world.z = 0
@@ -435,9 +470,6 @@ class Ar:
 
         # Check if the input date is in the past (expired)
         if input_date < current_date:
-            # print(
-            #     f"The provided date {input_date.strftime('%B %Y')} has expired."
-            # )
             return True
         else:
             return False
@@ -446,7 +478,7 @@ class Ar:
 
         if self.new_target_received:
 
-            if self.marker_id not in self.__detected_markers_corners:
+            if self.marker_id not in self.__detected_markers_world:
 
                 if self.marker_id is not None:
                     if self.robot_state == 0:
@@ -479,10 +511,10 @@ class Ar:
 
             self.new_target_received = False
 
-        if (self.center_x == 0) and (self.center_y == 0):
-            self.target_detected = False
-        else:
-            self.target_detected = True
+        # if (self.center_x == 0) and (self.center_y == 0):
+        #     self.target_detected = False
+        # else:
+        #     self.target_detected = True
 
         if self.image is not None:
             self.image = self.image.copy()
@@ -506,28 +538,29 @@ class Ar:
 
             self.image_pub.publish(image)
 
-    # def adjust_chest(self):
+    def adjust_chest(self):
 
-    #     # if self.counter == -1 and self.on_startup:
-    #     if self.counter == -1 and self.on_startup:
+        if self.counter == -1 and self.on_startup:
 
-    #         self.adjusting_chest = True
+            self.move_chest(200.0)
+            self.on_startup = False
 
-    #         chest_pos = Position()
-    #         chest_pos.position = 200
-    #         chest_pos.velocity = 1.0
-    #         self.__chest_position.publish(chest_pos)
+            self.update_target_service(True)
 
-    #         self.on_startup = False
+    def move_chest(self, desired_position):
 
-    #         print("Before")
+        self.adjusting_chest = True
 
-    #         rospy.sleep(5)
+        chest_pos = Position()
+        chest_pos.position = desired_position
+        chest_pos.velocity = 1.0
+        self.__chest_position.publish(chest_pos)
 
-    #         print("Update target")
-    #         self.adjusting_chest = False
+        self.chest_position = desired_position
 
-    #         self.update_target_service(True)
+        rospy.sleep(5)
+
+        self.adjusting_chest = False
 
 
 def rotate_marker_center(rvec, markersize, tvec=None):
@@ -552,5 +585,5 @@ if __name__ == "__main__":
 
     while not rospy.is_shutdown():
         ar.main_loop()
-        # ar.adjust_chest()
+        ar.adjust_chest()
         ar.rate.sleep()
