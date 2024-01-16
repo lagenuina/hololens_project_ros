@@ -5,7 +5,7 @@ from sensor_msgs.msg import Image, CompressedImage
 import cv2
 import numpy as np
 from cv_bridge import CvBridge, CvBridgeError
-from geometry_msgs.msg import (Point)
+from geometry_msgs.msg import (Point, Pose)
 
 from gopher_ros_clearcore.msg import (Position)
 import tf
@@ -53,9 +53,14 @@ class Ar:
         self.robot_state = 0  # Running
         self.new_target_received = False
 
+        self.chest_cam_anchor_tf = {
+            'position': np.array([0.0, 0.0, 0.0]),
+            'orientation': np.array([0.0, 0.0, 0.0, 1.0]),
+        }
+
         # Create dictionary to store position of detected markers
         self.__detected_markers_world = {}
-        self.__detected_markers_corners = {}
+        self.__detected_markers_centers = {}
 
         self.box_ids = [20, 21, 22]
 
@@ -85,11 +90,11 @@ class Ar:
             self.__target_identifier_callback,
         ),
 
-        # rospy.Subscriber(
-        #     '/workspace_cam/camera/color/image_raw',
-        #     Image,
-        #     self.image_callback,
-        # ),
+        rospy.Subscriber(
+            '/workspace_cam/camera/color/image_raw',
+            Image,
+            self.image_callback,
+        ),
 
         rospy.Subscriber(
             '/target_counter',
@@ -103,6 +108,12 @@ class Ar:
             self.image_callback,
         ),
 
+        rospy.Subscriber(
+            '/my_gen3/tf_chest_cam_anchor',
+            Pose,
+            self.__tf_chest_cam_anchor_callback,
+        ),
+
         # Publishers
         self.__target_camera_pub = rospy.Publisher(
             '/my_gen3/target_workspace_cam',
@@ -110,21 +121,15 @@ class Ar:
             queue_size=1,
         )
 
-        # self.__target_position_frame_pub = rospy.Publisher(
-        #     '/workspace_cam/target_position_in_frame',
-        #     Float32MultiArray,
-        #     queue_size=1,
-        # )
+        self.__target_position_frame_pub = rospy.Publisher(
+            '/workspace_cam/target_position_in_frame',
+            Float32MultiArray,
+            queue_size=1,
+        )
 
         self.__chest_position = rospy.Publisher(
             'z_chest_pos',
             Position,
-            queue_size=1,
-        )
-
-        self.image_pub = rospy.Publisher(
-            "/chest_cam/remote_interface",
-            Image,
             queue_size=1,
         )
 
@@ -185,15 +190,26 @@ class Ar:
             UpdateState,
         )
 
+    def __tf_chest_cam_anchor_callback(self, message):
+        self.chest_cam_anchor_tf['position'][0] = message.position.x
+        self.chest_cam_anchor_tf['position'][1] = message.position.y
+        self.chest_cam_anchor_tf['position'][2] = message.position.z
+
     def local_help(self, request):
 
         self.rh_help = False
-        self.local_help_service(request)
+        self.local_help_service(request.state)
+
         return True
 
     def update_chest(self, request):
 
-        if self.__detected_markers_world[self.marker_id][1] > 0.25:
+        diff = abs(
+            self.__detected_markers_world[self.marker_id][1]
+            - self.chest_cam_anchor_tf['position'][1]
+        )
+
+        if diff > 0.20:
             if self.chest_position == 200:
                 self.move_chest(440.0)
                 return int(440)
@@ -201,8 +217,7 @@ class Ar:
                 self.move_chest(200.0)
                 return int(200)
 
-        elif self.__detected_markers_world[
-            self.marker_id][1] < 0.25 and self.chest_position == 440:
+        elif diff < 0.25 and self.chest_position == 440:
             self.move_chest(200.0)
             return int(200)
 
@@ -210,7 +225,6 @@ class Ar:
 
     def resume_task(self, request):
 
-        print("Task resumed.")
         self.robot_state = 0
 
         if self.in_box:
@@ -331,6 +345,9 @@ class Ar:
             for i in range(len(ids)):
 
                 detected_markers_corners[ids[i][0]] = corners[i]
+        else:
+
+            return False
 
         # Iterate through detected markers
         for marker_id, corners in detected_markers_corners.items():
@@ -347,8 +364,6 @@ class Ar:
                 closest_marker_id = marker_id
                 closest_marker_distance = min_distance
                 closest_marker_corners = corners
-
-        # print(closest_marker_id, closest_marker_distance)
 
         if closest_marker_id is not None:
             # Calculate the corners of the rectangle with the same side lengths, centered at [center_x, center_y]
@@ -388,21 +403,12 @@ class Ar:
             target = np.array(target.fromanchor.data)
 
             self.__detected_markers_world[self.marker_id] = target
-            # self.__detected_markers_corners[self.marker_id] = corners_target
 
-            # target_position_world = Point()
-            # target_position_world.x = np.round(target[0], 2)
-            # target_position_world.y = np.round(target[1], 2)
-            # target_position_world.z = np.round(target[2], 2)
-            # self.__target_camera_pub.publish(target_position_world)
-
-            # print(target_position_world)
         return True
 
     def draw_ar(self):
 
-        # print(self.__detected_markers_world.keys())
-        print(self.__detected_markers_world)
+        # print(self.__detected_markers_world)
         target_position_world = Point()
 
         # If marker is detected
@@ -419,12 +425,18 @@ class Ar:
                         self.center_x = int(np.mean(corners[i][0][:, 0]))
                         self.center_y = int(np.mean(corners[i][0][:, 1]))
 
+                        self.__detected_markers_centers[self.marker_id] = [
+                            self.center_x, self.center_y
+                        ]
+
                 self.target_detected = True
             else:
-                self.center_x = 0
-                self.center_y = 0
 
-                self.target_detected = False
+                if self.marker_id not in self.__detected_markers_centers:
+                    self.center_x = 0
+                    self.center_y = 0
+
+                    self.target_detected = False
 
             target_position_world.x = np.round(
                 self.__detected_markers_world[self.marker_id][0], 2
@@ -436,26 +448,19 @@ class Ar:
                 self.__detected_markers_world[self.marker_id][2], 2
             )
 
+            center_in_frame = Float32MultiArray()
+            center_in_frame.data = [self.center_x, self.center_y]
+            self.__target_position_frame_pub.publish(center_in_frame)
+
         else:
 
             if self.robot_state != 0:
-                # self.center_x = 0
-                # self.center_y = 0
+
                 target_position_world.x = 0
                 target_position_world.y = 0
                 target_position_world.z = 0
 
         self.__target_camera_pub.publish(target_position_world)
-
-    # def check_target_size(self):
-
-    #     if self.in_box:
-
-    #         # self.__detected_markers_world[self.marker_id][2] -= 0.15
-    #         # Send help
-    #         self.remote_help_service(3)
-    #         self.change_task_state_service(3)
-    #         self.robot_state = 3
 
     def check_expiration_date(self):
 
@@ -481,6 +486,7 @@ class Ar:
             if self.marker_id not in self.__detected_markers_world:
 
                 if self.marker_id is not None:
+
                     if self.robot_state == 0:
 
                         # Call service with help request
@@ -516,27 +522,27 @@ class Ar:
         # else:
         #     self.target_detected = True
 
-        if self.image is not None:
-            self.image = self.image.copy()
+        # if self.image is not None:
+        #     self.image = self.image.copy()
 
-            if self.target_detected:
-                cv2.circle(
-                    self.image, (self.center_x, self.center_y),
-                    radius=30,
-                    color=(0, 255, 0),
-                    thickness=2
-                )
+        #     if self.target_detected:
+        #         cv2.circle(
+        #             self.image, (self.center_x, self.center_y),
+        #             radius=30,
+        #             color=(0, 255, 0),
+        #             thickness=2
+        #         )
 
-            # image = CompressedImage()
-            # # image.header = rospy.Time.now()
-            # image.format = "jpeg"
-            # image.data = np.array(cv2.imencode('.jpg', self.image)[1]).tobytes()
+        # image = CompressedImage()
+        # # image.header = rospy.Time.now()
+        # image.format = "jpeg"
+        # image.data = np.array(cv2.imencode('.jpg', self.image)[1]).tobytes()
 
-            # self.image_pub.publish(image)
-            image = Image()
-            image.data = np.array(cv2.imencode('.png', self.image)[1]).tobytes()
+        # self.image_pub.publish(image)
+        # image = Image()
+        # image.data = np.array(cv2.imencode('.png', self.image)[1]).tobytes()
 
-            self.image_pub.publish(image)
+        # self.image_pub.publish(image)
 
     def adjust_chest(self):
 
