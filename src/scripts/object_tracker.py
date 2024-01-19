@@ -41,13 +41,15 @@ class Ar:
         self.on_startup = True
         self.counter = None
         self.adjusting_chest = False
-        self.marker_size = 0.02
+        self.marker_size = 0.03
         self.in_box = False
         self.previous_marker_id = None
         self.marker_id = None
         self.expiration = None
         self.center_x = 0
         self.center_y = 0
+
+        self.state = 0
 
         self.chest_position = 440.0
         self.robot_state = 0  # Running
@@ -95,6 +97,12 @@ class Ar:
             Image,
             self.image_callback,
         ),
+
+        rospy.Subscriber(
+            f'/my_gen3/pick_and_place',
+            Int32,
+            self.__robot_pick_and_place,
+        )
 
         rospy.Subscriber(
             '/target_counter',
@@ -159,6 +167,12 @@ class Ar:
             self.local_help,
         )
 
+        self.remote_move_chest_service = rospy.Service(
+            '/move_chest',
+            UpdateChest,
+            self.move_chest_remote,
+        )
+
         # Service subscriber
         self.remote_help_service = rospy.ServiceProxy(
             '/remote_help_request_service',
@@ -190,6 +204,10 @@ class Ar:
             UpdateState,
         )
 
+    def __robot_pick_and_place(self, message):
+
+        self.state = message.data
+
     def __tf_chest_cam_anchor_callback(self, message):
         self.chest_cam_anchor_tf['position'][0] = message.position.x
         self.chest_cam_anchor_tf['position'][1] = message.position.y
@@ -217,7 +235,7 @@ class Ar:
                 self.move_chest(200.0)
                 return int(200)
 
-        elif diff < 0.25 and self.chest_position == 440:
+        elif self.state == 3 and self.chest_position == 440:
             self.move_chest(200.0)
             return int(200)
 
@@ -517,33 +535,6 @@ class Ar:
 
             self.new_target_received = False
 
-        # if (self.center_x == 0) and (self.center_y == 0):
-        #     self.target_detected = False
-        # else:
-        #     self.target_detected = True
-
-        # if self.image is not None:
-        #     self.image = self.image.copy()
-
-        #     if self.target_detected:
-        #         cv2.circle(
-        #             self.image, (self.center_x, self.center_y),
-        #             radius=30,
-        #             color=(0, 255, 0),
-        #             thickness=2
-        #         )
-
-        # image = CompressedImage()
-        # # image.header = rospy.Time.now()
-        # image.format = "jpeg"
-        # image.data = np.array(cv2.imencode('.jpg', self.image)[1]).tobytes()
-
-        # self.image_pub.publish(image)
-        # image = Image()
-        # image.data = np.array(cv2.imencode('.png', self.image)[1]).tobytes()
-
-        # self.image_pub.publish(image)
-
     def adjust_chest(self):
 
         if self.counter == -1 and self.on_startup:
@@ -552,6 +543,15 @@ class Ar:
             self.on_startup = False
 
             self.update_target_service(True)
+
+    def move_chest_remote(self, request):
+
+        if self.chest_position == 200:
+            self.move_chest(440.0)
+        elif self.chest_position == 440:
+            self.move_chest(200.0)
+
+        return 0
 
     def move_chest(self, desired_position):
 
