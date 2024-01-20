@@ -28,6 +28,7 @@ class RhInterface:
         self.target_detected = False
         self.state = 0
 
+        self.box = [20, 21, 22]
         self.last_seen_markers = {}
         self.file_path = '/home/fetch/catkin_workspaces/hololens_ws/src/holo_project/src/scripts/id_medicine.csv'
         self.medicine_info = self.read_file()
@@ -141,10 +142,11 @@ class RhInterface:
                                 'expiration': expiration
                             }
 
-                            # Display information for detected marker
-                            self.display_medicine_info(
-                                corner[0], name, id, expiration
-                            )
+                            if id not in self.box:
+                                # Display information for detected marker
+                                self.display_medicine_info(
+                                    corner[0], name, id, expiration
+                                )
 
                 # Check for markers that were not detected in this frame
                 for id, info in self.last_seen_markers.items():

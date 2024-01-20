@@ -1,5 +1,5 @@
 <?xml version="1.0"?>
-<launch>=
+<launch>
     <arg 
     name="serial_number_workspace" 
     default="244622072883"/>
@@ -26,6 +26,8 @@
     </include>
     </group> -->
 
+    <include file="$(find ros_tcp_endpoint)/launch/endpoint_lh_rh.launch" >
+    </include>
 
     <group ns="/chest_cam">
 

@@ -364,7 +364,6 @@ class Ar:
 
                 detected_markers_corners[ids[i][0]] = corners[i]
         else:
-
             return False
 
         # Iterate through detected markers
@@ -434,7 +433,8 @@ class Ar:
 
             corners, ids, _ = self.aruco_detector.detectMarkers(self.image)
 
-            if ids is not None and self.marker_id in ids:
+            if ids is not None and self.marker_id in ids and not self.check_expiration_date(
+            ):
 
                 for i in range(len(ids)):
 
