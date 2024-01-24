@@ -227,6 +227,13 @@ class Ar:
             - self.chest_cam_anchor_tf['position'][1]
         )
 
+        print(
+            diff, self.__detected_markers_world[self.marker_id][1],
+            self.chest_cam_anchor_tf['position'][1]
+        )
+
+        print(self.chest_position)
+
         if diff > 0.20:
             if self.chest_position == 200:
                 self.move_chest(440.0)
@@ -425,7 +432,6 @@ class Ar:
 
     def draw_ar(self):
 
-        # print(self.__detected_markers_world)
         target_position_world = Point()
 
         # If marker is detected
