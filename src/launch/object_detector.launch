@@ -9,13 +9,6 @@
 
     <node 
     pkg="holo_project" 
-    type="rh_interface_image.py" 
-    name="rh_interface" 
-    output="screen">
-    </node>
-
-    <node 
-    pkg="holo_project" 
     type="read_from_csv.py" 
     name="csv_reader_node" 
     output="screen">

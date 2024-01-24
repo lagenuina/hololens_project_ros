@@ -62,18 +62,8 @@ class Ar:
 
         # Create dictionary to store position of detected markers
         self.__detected_markers_world = {}
-        self.__detected_markers_centers = {}
 
         self.box_ids = [20, 21, 22]
-
-        # Camera calibration parameters (replace with your actual values)
-        # self.camera_matrix = np.array(
-        #     [
-        #         [909.1905517578125, 0.0, 644.7723999023438],
-        #         [0.0, 908.4768676757812, 377.5361633300781],
-        #         [0.0, 0.0, 1.0],
-        #     ]
-        # )
 
         self.camera_matrix = np.array(
             [
@@ -129,12 +119,6 @@ class Ar:
             queue_size=1,
         )
 
-        self.__target_position_frame_pub = rospy.Publisher(
-            '/workspace_cam/target_position_in_frame',
-            Float32MultiArray,
-            queue_size=1,
-        )
-
         self.__chest_position = rospy.Publisher(
             'z_chest_pos',
             Position,
@@ -161,28 +145,11 @@ class Ar:
             self.calculate_world_position,
         )
 
-        self.remote_service = rospy.Service(
-            '/local_request',
-            UpdateState,
-            self.local_help,
-        )
-
         self.remote_move_chest_service = rospy.Service(
             '/move_chest',
             UpdateChest,
             self.move_chest_remote,
         )
-
-        # Service subscriber
-        self.remote_help_service = rospy.ServiceProxy(
-            '/remote_help_request_service',
-            UpdateState,
-        )
-
-        # self.pause_task_service = rospy.ServiceProxy(
-        #     '/pause_task_service',
-        #     UpdateState,
-        # )
 
         self.update_target_service = rospy.ServiceProxy(
             '/update_target',
@@ -213,26 +180,12 @@ class Ar:
         self.chest_cam_anchor_tf['position'][1] = message.position.y
         self.chest_cam_anchor_tf['position'][2] = message.position.z
 
-    def local_help(self, request):
-
-        self.rh_help = False
-        self.local_help_service(request.state)
-
-        return True
-
     def update_chest(self, request):
 
         diff = abs(
             self.__detected_markers_world[self.marker_id][1]
             - self.chest_cam_anchor_tf['position'][1]
         )
-
-        print(
-            diff, self.__detected_markers_world[self.marker_id][1],
-            self.chest_cam_anchor_tf['position'][1]
-        )
-
-        print(self.chest_position)
 
         if diff > 0.20:
             if self.chest_position == 200:
@@ -252,14 +205,12 @@ class Ar:
 
         self.robot_state = 0
 
-        if self.in_box:
+        if self.in_box or self.is_expired():
             self.update_target_service(True)
         elif self.marker_id in self.__detected_markers_world:
             self.change_task_state_service(0)
         else:
             self.update_target_service(True)
-
-        self.remote_help_service(0)
 
         return True
 
@@ -318,8 +269,6 @@ class Ar:
             if ids is not None:
                 for i in range(len(ids)):
 
-                    # self.__detected_markers_corners[ids[i][0]] = corners[i]
-
                     # Calculate World position ID
                     rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(
                         corners[i],
@@ -347,8 +296,6 @@ class Ar:
                     self.__detected_markers_world[ids[i][0]] = filtered_position
 
         self.draw_ar()
-
-        # cv2.waitKey(3)
 
     def calculate_world_position(self, request):
 
@@ -437,31 +384,6 @@ class Ar:
         # If marker is detected
         if self.marker_id in self.__detected_markers_world:
 
-            corners, ids, _ = self.aruco_detector.detectMarkers(self.image)
-
-            if ids is not None and self.marker_id in ids and not self.check_expiration_date(
-            ):
-
-                for i in range(len(ids)):
-
-                    if ids[i] == self.marker_id:
-
-                        self.center_x = int(np.mean(corners[i][0][:, 0]))
-                        self.center_y = int(np.mean(corners[i][0][:, 1]))
-
-                        self.__detected_markers_centers[self.marker_id] = [
-                            self.center_x, self.center_y
-                        ]
-
-                self.target_detected = True
-            else:
-
-                if self.marker_id not in self.__detected_markers_centers:
-                    self.center_x = 0
-                    self.center_y = 0
-
-                    self.target_detected = False
-
             target_position_world.x = np.round(
                 self.__detected_markers_world[self.marker_id][0], 2
             )
@@ -471,10 +393,6 @@ class Ar:
             target_position_world.z = np.round(
                 self.__detected_markers_world[self.marker_id][2], 2
             )
-
-            center_in_frame = Float32MultiArray()
-            center_in_frame.data = [self.center_x, self.center_y]
-            self.__target_position_frame_pub.publish(center_in_frame)
 
         else:
 
@@ -486,7 +404,7 @@ class Ar:
 
         self.__target_camera_pub.publish(target_position_world)
 
-    def check_expiration_date(self):
+    def is_expired(self):
 
         # Parse the input string to extract month and year
         try:
@@ -507,6 +425,13 @@ class Ar:
 
         if self.new_target_received:
 
+            # Check target size
+            if self.in_box:
+                # Send help
+                self.local_help_service(3)
+                self.change_task_state_service(3)
+                self.robot_state = 3
+
             if self.marker_id not in self.__detected_markers_world:
 
                 if self.marker_id is not None:
@@ -514,25 +439,18 @@ class Ar:
                     if self.robot_state == 0:
 
                         # Call service with help request
-                        self.remote_help_service(1)
+                        self.local_help_service(1)
                         self.change_task_state_service(1)
 
                         self.robot_state = 1
 
             else:
 
-                # Check target size
-                if self.in_box:
-                    # Send help
-                    self.remote_help_service(3)
-                    self.change_task_state_service(3)
-                    self.robot_state = 3
-
                 # Check expiration date
-                elif self.check_expiration_date():
+                if self.is_expired():
 
                     if self.robot_state == 0:
-                        self.remote_help_service(2)
+                        self.local_help_service(2)
                         self.change_task_state_service(2)
                         self.robot_state = 2
 
