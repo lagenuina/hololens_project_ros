@@ -66,15 +66,6 @@ class Ar:
 
         self.box_ids = [20, 21, 22]
 
-        # Camera calibration parameters (replace with your actual values)
-        # self.camera_matrix = np.array(
-        #     [
-        #         [909.1905517578125, 0.0, 644.7723999023438],
-        #         [0.0, 908.4768676757812, 377.5361633300781],
-        #         [0.0, 0.0, 1.0],
-        #     ]
-        # )
-
         self.camera_matrix = np.array(
             [
                 [605.3272705078125, 0.0, 312.21490478515625],
@@ -179,11 +170,6 @@ class Ar:
             UpdateState,
         )
 
-        # self.pause_task_service = rospy.ServiceProxy(
-        #     '/pause_task_service',
-        #     UpdateState,
-        # )
-
         self.update_target_service = rospy.ServiceProxy(
             '/update_target',
             BoolUpdate,
@@ -227,13 +213,6 @@ class Ar:
             - self.chest_cam_anchor_tf['position'][1]
         )
 
-        print(
-            diff, self.__detected_markers_world[self.marker_id][1],
-            self.chest_cam_anchor_tf['position'][1]
-        )
-
-        print(self.chest_position)
-
         if diff > 0.20:
             if self.chest_position == 200:
                 self.move_chest(440.0)
@@ -252,7 +231,7 @@ class Ar:
 
         self.robot_state = 0
 
-        if self.in_box:
+        if self.in_box or self.is_expired():
             self.update_target_service(True)
         elif self.marker_id in self.__detected_markers_world:
             self.change_task_state_service(0)
@@ -318,8 +297,6 @@ class Ar:
             if ids is not None:
                 for i in range(len(ids)):
 
-                    # self.__detected_markers_corners[ids[i][0]] = corners[i]
-
                     # Calculate World position ID
                     rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(
                         corners[i],
@@ -347,8 +324,6 @@ class Ar:
                     self.__detected_markers_world[ids[i][0]] = filtered_position
 
         self.draw_ar()
-
-        # cv2.waitKey(3)
 
     def calculate_world_position(self, request):
 
@@ -439,7 +414,7 @@ class Ar:
 
             corners, ids, _ = self.aruco_detector.detectMarkers(self.image)
 
-            if ids is not None and self.marker_id in ids and not self.check_expiration_date(
+            if ids is not None and self.marker_id in ids and not self.is_expired(
             ):
 
                 for i in range(len(ids)):
@@ -486,7 +461,7 @@ class Ar:
 
         self.__target_camera_pub.publish(target_position_world)
 
-    def check_expiration_date(self):
+    def is_expired(self):
 
         # Parse the input string to extract month and year
         try:
@@ -507,6 +482,13 @@ class Ar:
 
         if self.new_target_received:
 
+            # Check target size
+            if self.in_box:
+                # Send help
+                self.remote_help_service(3)
+                self.change_task_state_service(3)
+                self.robot_state = 3
+
             if self.marker_id not in self.__detected_markers_world:
 
                 if self.marker_id is not None:
@@ -521,15 +503,8 @@ class Ar:
 
             else:
 
-                # Check target size
-                if self.in_box:
-                    # Send help
-                    self.remote_help_service(3)
-                    self.change_task_state_service(3)
-                    self.robot_state = 3
-
                 # Check expiration date
-                elif self.check_expiration_date():
+                if self.is_expired():
 
                     if self.robot_state == 0:
                         self.remote_help_service(2)
