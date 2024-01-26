@@ -482,13 +482,6 @@ class Ar:
 
         if self.new_target_received:
 
-            # Check target size
-            if self.in_box:
-                # Send help
-                self.remote_help_service(3)
-                self.change_task_state_service(3)
-                self.robot_state = 3
-
             if self.marker_id not in self.__detected_markers_world:
 
                 if self.marker_id is not None:
@@ -503,8 +496,15 @@ class Ar:
 
             else:
 
+                # Check target size
+                if self.in_box:
+                    # Send help
+                    self.remote_help_service(3)
+                    self.change_task_state_service(3)
+                    self.robot_state = 3
+
                 # Check expiration date
-                if self.is_expired():
+                elif self.is_expired():
 
                     if self.robot_state == 0:
                         self.remote_help_service(2)
