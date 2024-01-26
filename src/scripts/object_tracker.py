@@ -145,12 +145,6 @@ class Ar:
             self.calculate_world_position,
         )
 
-        self.remote_move_chest_service = rospy.Service(
-            '/move_chest',
-            UpdateChest,
-            self.move_chest_remote,
-        )
-
         self.update_target_service = rospy.ServiceProxy(
             '/update_target',
             BoolUpdate,
@@ -425,13 +419,6 @@ class Ar:
 
         if self.new_target_received:
 
-            # Check target size
-            if self.in_box:
-                # Send help
-                self.local_help_service(3)
-                self.change_task_state_service(3)
-                self.robot_state = 3
-
             if self.marker_id not in self.__detected_markers_world:
 
                 if self.marker_id is not None:
@@ -446,8 +433,15 @@ class Ar:
 
             else:
 
+                # Check target size
+                if self.in_box:
+                    # Send help
+                    self.local_help_service(3)
+                    self.change_task_state_service(3)
+                    self.robot_state = 3
+
                 # Check expiration date
-                if self.is_expired():
+                elif self.is_expired():
 
                     if self.robot_state == 0:
                         self.local_help_service(2)
@@ -467,15 +461,6 @@ class Ar:
             self.on_startup = False
 
             self.update_target_service(True)
-
-    def move_chest_remote(self, request):
-
-        if self.chest_position == 200:
-            self.move_chest(440.0)
-        elif self.chest_position == 440:
-            self.move_chest(200.0)
-
-        return 0
 
     def move_chest(self, desired_position):
 
