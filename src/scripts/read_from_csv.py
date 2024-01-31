@@ -35,7 +35,9 @@ class FileReader:
 
         self.chest_position = 440
         self.update_target_service = rospy.Service(
-            '/update_target', BoolUpdate, self.update_target
+            '/update_target',
+            BoolUpdate,
+            self.update_target,
         )
 
     def update_target(self, request):

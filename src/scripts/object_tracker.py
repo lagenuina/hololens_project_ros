@@ -55,6 +55,8 @@ class Ar:
         self.robot_state = 0  # Running
         self.new_target_received = False
 
+        self.user = 0  #0 robot, 1 remote, 2 local
+
         self.chest_cam_anchor_tf = {
             'position': np.array([0.0, 0.0, 0.0]),
             'orientation': np.array([0.0, 0.0, 0.0, 1.0]),
@@ -81,12 +83,6 @@ class Ar:
             '/target_identifier',
             TargetInfo,
             self.__target_identifier_callback,
-        ),
-
-        rospy.Subscriber(
-            '/workspace_cam/camera/color/image_raw',
-            Image,
-            self.image_callback,
         ),
 
         rospy.Subscriber(
@@ -129,6 +125,12 @@ class Ar:
         self.__chest_position = rospy.Publisher(
             'z_chest_pos',
             Position,
+            queue_size=1,
+        )
+
+        self.__user_control = rospy.Publisher(
+            '/user_control',
+            Int32,
             queue_size=1,
         )
 
@@ -213,7 +215,7 @@ class Ar:
             - self.chest_cam_anchor_tf['position'][1]
         )
 
-        if diff > 0.20:
+        if diff > 0.18:
             if self.chest_position == 200:
                 self.move_chest(440.0)
                 return int(440)
@@ -231,7 +233,8 @@ class Ar:
 
         self.robot_state = 0
 
-        if self.in_box or self.is_expired():
+        # if self.in_box or self.is_expired():
+        if self.in_box:
             self.update_target_service(True)
         elif self.marker_id in self.__detected_markers_world:
             self.change_task_state_service(0)
@@ -239,6 +242,7 @@ class Ar:
             self.update_target_service(True)
 
         self.remote_help_service(0)
+        self.user = 0
 
         return True
 
@@ -364,7 +368,9 @@ class Ar:
                 closest_marker_distance = min_distance
                 closest_marker_corners = corners
 
-        if closest_marker_id is not None:
+        if closest_marker_id is not None and (
+            self.marker_id != closest_marker_id
+        ):
             # Calculate the corners of the rectangle with the same side lengths, centered at [center_x, center_y]
             half_width = (
                 np.abs(
@@ -492,6 +498,7 @@ class Ar:
                         self.remote_help_service(1)
                         self.change_task_state_service(1)
 
+                        self.user = 1
                         self.robot_state = 1
 
             else:
@@ -503,6 +510,8 @@ class Ar:
                     self.change_task_state_service(3)
                     self.robot_state = 3
 
+                    self.user = 1
+
                 # Check expiration date
                 elif self.is_expired():
 
@@ -511,10 +520,18 @@ class Ar:
                         self.change_task_state_service(2)
                         self.robot_state = 2
 
+                        self.user = 1
+
                 else:
                     self.change_task_state_service(0)
 
+                    self.user = 0
+
             self.new_target_received = False
+
+        user_in_charge = Int32()
+        user_in_charge.data = self.user
+        self.__user_control.publish(user_in_charge)
 
     def adjust_chest(self):
 
