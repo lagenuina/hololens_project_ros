@@ -177,6 +177,11 @@ class Ar:
             BoolUpdate,
         )
 
+        self.remote_handling = rospy.ServiceProxy(
+            '/remote_handling',
+            BoolUpdate,
+        )
+
         self.change_task_state_service = rospy.ServiceProxy(
             '/change_task_state_service',
             UpdateState,
@@ -215,7 +220,8 @@ class Ar:
             - self.chest_cam_anchor_tf['position'][1]
         )
 
-        if diff > 0.18:
+        print(diff)
+        if diff > 0.20:
             if self.chest_position == 200:
                 self.move_chest(440.0)
                 return int(440)
@@ -237,11 +243,12 @@ class Ar:
         if self.in_box:
             self.update_target_service(True)
         elif self.marker_id in self.__detected_markers_world:
+            self.remote_handling(True)
             self.change_task_state_service(0)
         else:
             self.update_target_service(True)
+            self.remote_help_service(0)
 
-        self.remote_help_service(0)
         self.user = 0
 
         return True
@@ -327,10 +334,12 @@ class Ar:
                     # Store the position in the dictionary
                     self.__detected_markers_world[ids[i][0]] = filtered_position
 
+        # print(self.__detected_markers_world)
         self.draw_ar()
 
     def calculate_world_position(self, request):
 
+        print("Was called!")
         closest_marker_id = None
         closest_marker_distance = np.inf
         closest_marker_corners = None
@@ -349,6 +358,8 @@ class Ar:
             for i in range(len(ids)):
 
                 detected_markers_corners[ids[i][0]] = corners[i]
+
+                print(ids)
         else:
             return False
 
@@ -368,46 +379,61 @@ class Ar:
                 closest_marker_distance = min_distance
                 closest_marker_corners = corners
 
-        if closest_marker_id is not None and (
-            self.marker_id != closest_marker_id
-        ):
-            # Calculate the corners of the rectangle with the same side lengths, centered at [center_x, center_y]
-            half_width = (
-                np.abs(
-                    closest_marker_corners[0][0][0]
-                    - closest_marker_corners[0][2][0]
-                )
-            ) / 2
+        print(closest_marker_distance, closest_marker_id)
 
-            corners_target = np.array(
-                [
+        if closest_marker_id is not None:
+
+            if closest_marker_distance < 15 and (
+                self.marker_id != closest_marker_id
+            ):
+                # print(
+                #     self.__detected_markers_world[self.marker_id],
+                #     self.__detected_markers_world[closest_marker_id]
+                # )
+
+                self.__detected_markers_world[
+                    self.marker_id
+                ] = self.__detected_markers_world[closest_marker_id]
+
+                print("After", self.__detected_markers_world[self.marker_id])
+            else:
+                # Calculate the corners of the rectangle with the same side lengths, centered at [center_x, center_y]
+                half_width = (
+                    np.abs(
+                        closest_marker_corners[0][0][0]
+                        - closest_marker_corners[0][2][0]
+                    )
+                ) / 2
+
+                corners_target = np.array(
                     [
-                        [center[0] - half_width, center[1] - half_width],
-                        [center[0] + half_width, center[1] - half_width],
-                        [center[0] + half_width, center[1] + half_width],
-                        [center[0] - half_width, center[1] + half_width],
-                    ]
-                ],
-                dtype=np.float32
-            )
+                        [
+                            [center[0] - half_width, center[1] - half_width],
+                            [center[0] + half_width, center[1] - half_width],
+                            [center[0] + half_width, center[1] + half_width],
+                            [center[0] - half_width, center[1] + half_width],
+                        ]
+                    ],
+                    dtype=np.float32
+                )
 
-            # Calculate World position ID
-            rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(
-                corners_target,
-                self.marker_size,
-                self.camera_matrix,
-                self.dist_coeffs,
-            )
+                # Calculate World position ID
+                rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(
+                    corners_target,
+                    self.marker_size,
+                    self.camera_matrix,
+                    self.dist_coeffs,
+                )
 
-            ret = rotate_marker_center(rvecs, self.marker_size, tvecs)
+                ret = rotate_marker_center(rvecs, self.marker_size, tvecs)
 
-            position_target = Float32MultiArray()
-            position_target.data = ret
+                position_target = Float32MultiArray()
+                position_target.data = ret
 
-            target = self.convert_target_service(position_target)
-            target = np.array(target.fromanchor.data)
+                target = self.convert_target_service(position_target)
+                target = np.array(target.fromanchor.data)
 
-            self.__detected_markers_world[self.marker_id] = target
+                self.__detected_markers_world[self.marker_id] = target
 
         return True
 
