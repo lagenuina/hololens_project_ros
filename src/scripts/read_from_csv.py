@@ -5,6 +5,7 @@ import csv
 from std_msgs.msg import Int32
 from Scripts.msg import TargetInfo
 from Scripts.srv import BoolUpdate
+from std_srvs.srv import Empty
 
 
 class FileReader:
@@ -16,7 +17,9 @@ class FileReader:
         self.csv_data = self.read_file()
         self.rate = rospy.Rate(1)
 
-        self.on_startup = True
+        self.task_started = True
+        self.task_ended = False
+
         self.adjusting_chest = False
         self.target_pub = rospy.Publisher(
             '/target_identifier',
@@ -38,6 +41,14 @@ class FileReader:
             '/update_target',
             BoolUpdate,
             self.update_target,
+        )
+
+        self.start_recording = rospy.ServiceProxy(
+            '/data_writer/resume_recording', Empty
+        )
+
+        self.stop_recording = rospy.ServiceProxy(
+            '/data_writer/finish_recording', Empty
         )
 
     def update_target(self, request):
@@ -79,6 +90,10 @@ class FileReader:
 
         if self.update and self.counter < len(self.csv_data):
 
+            if self.task_started and self.counter == 0:
+                self.start_recording()
+                self.task_started = False
+
             target_counter = Int32()
             target_counter.data = self.counter
             self.target_counter_pub.publish(target_counter)
@@ -91,6 +106,11 @@ class FileReader:
                                                      ]['expiration']
 
                 self.target_pub.publish(new_target)
+
+        if self.counter == len(self.csv_data) and not self.task_ended:
+            print("Hereeeeeeeee")
+            self.stop_recording()
+            self.task_ended = True
 
 
 if __name__ == '__main__':

@@ -211,6 +211,7 @@ class Ar:
         self.rh_help = False
         self.local_help_service(request.state)
 
+        self.user = 2
         return True
 
     def update_chest(self, request):
@@ -339,7 +340,6 @@ class Ar:
 
     def calculate_world_position(self, request):
 
-        print("Was called!")
         closest_marker_id = None
         closest_marker_distance = np.inf
         closest_marker_corners = None
@@ -359,7 +359,6 @@ class Ar:
 
                 detected_markers_corners[ids[i][0]] = corners[i]
 
-                print(ids)
         else:
             return False
 
@@ -379,23 +378,21 @@ class Ar:
                 closest_marker_distance = min_distance
                 closest_marker_corners = corners
 
-        print(closest_marker_distance, closest_marker_id)
-
         if closest_marker_id is not None:
 
             if closest_marker_distance < 15 and (
                 self.marker_id != closest_marker_id
             ):
-                # print(
-                #     self.__detected_markers_world[self.marker_id],
-                #     self.__detected_markers_world[closest_marker_id]
-                # )
 
                 self.__detected_markers_world[
                     self.marker_id
                 ] = self.__detected_markers_world[closest_marker_id]
 
-                print("After", self.__detected_markers_world[self.marker_id])
+                self.__detected_markers_centers[self.marker_id] = [
+                    int(np.mean(closest_marker_corners[0][:, 0])),
+                    int(np.mean(closest_marker_corners[0][:, 1]))
+                ]
+
             else:
                 # Calculate the corners of the rectangle with the same side lengths, centered at [center_x, center_y]
                 half_width = (
@@ -435,6 +432,11 @@ class Ar:
 
                 self.__detected_markers_world[self.marker_id] = target
 
+                self.__detected_markers_centers[self.marker_id
+                                               ] = [center[0], center[1]]
+
+                print(self.__detected_markers_centers[self.marker_id])
+
         return True
 
     def draw_ar(self):
@@ -464,6 +466,8 @@ class Ar:
             else:
 
                 if self.marker_id not in self.__detected_markers_centers:
+                    self.__detected_markers_centers[self.marker_id] = [0, 0]
+
                     self.center_x = 0
                     self.center_y = 0
 
@@ -479,8 +483,10 @@ class Ar:
                 self.__detected_markers_world[self.marker_id][2], 2
             )
 
+            print(self.__detected_markers_centers[self.marker_id])
             center_in_frame = Float32MultiArray()
-            center_in_frame.data = [self.center_x, self.center_y]
+            center_in_frame.data = self.__detected_markers_centers[
+                self.marker_id]
             self.__target_position_frame_pub.publish(center_in_frame)
 
         else:
