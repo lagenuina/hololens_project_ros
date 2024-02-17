@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 import rospy
 from std_msgs.msg import Float32MultiArray, Int32
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import Image, CompressedImage
 import cv2
 import csv
 from datetime import datetime
@@ -18,7 +18,7 @@ class RhInterface:
         rospy.init_node("rh_interface")
 
         self.bridge = CvBridge()
-        self.rate = rospy.Rate(5)
+        self.rate = rospy.Rate(100)
 
         self.image = None
         self.width = None
@@ -71,7 +71,10 @@ class RhInterface:
     def image_callback(self, data):
 
         try:
-            self.image = self.bridge.imgmsg_to_cv2(data, "bgr8")
+            self.image = self.bridge.imgmsg_to_cv2(
+                data,
+                desired_encoding="bgr8",
+            )
             self.width = data.width
             self.height = data.height
 
@@ -161,7 +164,11 @@ class RhInterface:
                         )
 
             image = Image()
-            image.data = np.array(cv2.imencode('.png', self.image)[1]).tobytes()
+            # image.data = np.array(cv2.imencode('.png', self.image)[1]).tobytes()
+            image = self.bridge.cv2_to_imgmsg(
+                self.image,
+                encoding="bgr8",
+            )
 
             self.image_pub.publish(image)
 

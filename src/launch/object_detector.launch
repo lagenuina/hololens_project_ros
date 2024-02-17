@@ -1,5 +1,10 @@
 <?xml version="1.0"?>
 <launch>
+
+    <arg 
+    name="task" 
+    default="study"/>
+
     <node 
     pkg="holo_project" 
     type="object_tracker.py" 
@@ -19,6 +24,9 @@
     type="read_from_csv.py" 
     name="csv_reader_node" 
     output="screen">
+        <param 
+        name="task" 
+        value="$(arg task)"/>
     </node>
 
 </launch>

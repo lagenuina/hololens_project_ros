@@ -161,12 +161,6 @@ class Ar:
             self.calculate_world_position,
         )
 
-        self.remote_service = rospy.Service(
-            '/local_request',
-            UpdateState,
-            self.local_help,
-        )
-
         self.remote_move_chest_service = rospy.Service(
             '/move_chest',
             UpdateState,
@@ -216,13 +210,6 @@ class Ar:
         self.chest_cam_anchor_tf['position'][0] = message.position.x
         self.chest_cam_anchor_tf['position'][1] = message.position.y
         self.chest_cam_anchor_tf['position'][2] = message.position.z
-
-    def local_help(self, request):
-
-        self.local_help_service(request.state)
-
-        self.user = 2
-        return True
 
     def update_chest(self, request):
 
@@ -530,8 +517,14 @@ class Ar:
 
                     if self.robot_state == 0:
 
-                        # Call service with help request
-                        self.remote_help_service(1)
+                        if self.counter in [1, 3, 4]:
+                            self.local_help_service(1)
+                            self.user = 2
+                        else:
+                            # Call service with help request
+                            self.remote_help_service(1)
+                            self.user = 1
+
                         self.change_task_state_service(1)
 
                         self.robot_state = 1
@@ -549,7 +542,15 @@ class Ar:
                 elif self.is_expired():
 
                     if self.robot_state == 0:
-                        self.remote_help_service(2)
+
+                        if self.counter in [1, 3, 4]:
+                            self.local_help_service(2)
+                            self.user = 2
+                        else:
+                            # Call service with help request
+                            self.remote_help_service(2)
+                            self.user = 1
+
                         self.change_task_state_service(2)
                         self.robot_state = 2
 
@@ -559,9 +560,6 @@ class Ar:
                     self.user = 0
 
             self.new_target_received = False
-
-        if self.rh_help and self.user != 2:
-            self.user = 1
 
         user_in_charge = Int32()
         user_in_charge.data = self.user

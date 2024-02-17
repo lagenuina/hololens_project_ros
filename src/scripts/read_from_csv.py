@@ -4,15 +4,51 @@ import rospy
 import csv
 from std_msgs.msg import Int32
 from Scripts.msg import TargetInfo
-from Scripts.srv import BoolUpdate
+from Scripts.srv import BoolUpdate, UpdateState
 from std_srvs.srv import Empty
 
 
 class FileReader:
 
-    def __init__(self):
+    def __init__(
+        self,
+        task,
+    ):
 
-        self.file_path = '/home/fetch/catkin_workspaces/hololens_ws/src/holo_project/src/scripts/task_sequence.csv'
+        self.task = task
+
+        if self.task == 'study':
+            csv_file = 'task_sequence.csv'
+
+            rospy.wait_for_service('/data_writer/resume_recording')
+
+            self.start_image_recording = rospy.ServiceProxy(
+                '/chest_cam/image_writer/resume_recording',
+                Empty,
+            )
+
+            self.stop_image_recording = rospy.ServiceProxy(
+                '/chest_cam/image_writer/pause_recording',
+                Empty,
+            )
+
+            self.start_recording = rospy.ServiceProxy(
+                '/data_writer/resume_recording',
+                Empty,
+            )
+
+            self.stop_recording = rospy.ServiceProxy(
+                '/data_writer/finish_recording',
+                Empty,
+            )
+
+        elif self.task == 'training1':
+            csv_file = 'task_sequence_training_1.csv'
+
+        elif self.task == 'training2':
+            csv_file = 'task_sequence_training_2.csv'
+
+        self.file_path = '/home/fetch/catkin_workspaces/hololens_ws/src/holo_project/src/scripts/' + csv_file
 
         self.csv_data = self.read_file()
         self.rate = rospy.Rate(1)
@@ -41,14 +77,6 @@ class FileReader:
             '/update_target',
             BoolUpdate,
             self.update_target,
-        )
-
-        self.start_recording = rospy.ServiceProxy(
-            '/data_writer/resume_recording', Empty
-        )
-
-        self.stop_recording = rospy.ServiceProxy(
-            '/data_writer/finish_recording', Empty
         )
 
     def update_target(self, request):
@@ -91,7 +119,11 @@ class FileReader:
         if self.update and self.counter < len(self.csv_data):
 
             if self.task_started and self.counter == 0:
-                self.start_recording()
+
+                if self.task == 'study':
+                    self.start_recording()
+                    self.start_image_recording()
+
                 self.task_started = False
 
             target_counter = Int32()
@@ -108,15 +140,24 @@ class FileReader:
                 self.target_pub.publish(new_target)
 
         if self.counter == len(self.csv_data) and not self.task_ended:
-            print("Hereeeeeeeee")
-            self.stop_recording()
+
+            if self.task == 'study':
+                self.stop_recording()
+                self.stop_image_recording()
+
             self.task_ended = True
 
 
 if __name__ == '__main__':
 
     rospy.init_node('csv_reader_node', anonymous=True)
-    reader = FileReader()
+
+    # # ROS parameters:
+    task = rospy.get_param(
+        param_name=f'{rospy.get_name()}/task',
+        default='study',
+    )
+    reader = FileReader(task=task)
 
     while not rospy.is_shutdown():
         reader.main_loop()

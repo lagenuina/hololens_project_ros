@@ -1,28 +1,31 @@
 <?xml version="1.0"?>
 <launch>
     <arg 
-    name="serial_number_workspace" 
-    default="244622072883"/>
+    name="serial_number_chest" 
+    default="242222071812"/>
+
+    <group ns="/chest_cam">
+        <include file="$(find realsense2_camera)/launch/rs_camera.launch">
+            <arg
+            name="serial_no"
+            value="$(arg serial_number_chest)"/>
+
+            <arg
+            name="color_width" 
+            value="640"/>
+
+            <arg
+            name="color_height" 
+            value="480"/>
+
+            <arg
+            name="color_fps" 
+            value="30"/>
+
+        </include>
+    </group>
 
     <include file="$(find ros_tcp_endpoint)/launch/endpoint_lh_rh.launch" >
     </include>
-
-    <group ns="/chest_cam">
-
-    <include file="$(find realsense2_camera)/launch/rs_camera.launch" >
-    <param
-    name="serial_no"
-    value="$(arg serial_number_chest)"/>
-
-    <param 
-    name="color_fps" 
-    default="15"/>
-
-    <param 
-    name="depth_fps" 
-    default="15"/>
-
-    </include>
-    </group>
 
 </launch>
