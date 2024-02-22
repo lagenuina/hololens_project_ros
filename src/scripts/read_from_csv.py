@@ -28,7 +28,7 @@ class FileReader:
             )
 
             self.stop_image_recording = rospy.ServiceProxy(
-                '/chest_cam/image_writer/pause_recording',
+                '/chest_cam/image_writer/finish_recording',
                 Empty,
             )
 
@@ -42,11 +42,8 @@ class FileReader:
                 Empty,
             )
 
-        elif self.task == 'training1':
-            csv_file = 'task_sequence_training_1.csv'
-
-        elif self.task == 'training2':
-            csv_file = 'task_sequence_training_2.csv'
+        elif self.task == 'training':
+            csv_file = 'task_sequence_training.csv'
 
         self.file_path = '/home/fetch/catkin_workspaces/hololens_ws/src/holo_project/src/scripts/' + csv_file
 

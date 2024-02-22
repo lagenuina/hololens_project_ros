@@ -215,10 +215,14 @@ class Ar:
 
         detected_marker_y = self.__detected_markers_world[self.marker_id][1]
         chest_pos_y = self.chest_cam_anchor_tf['position'][1]
-        diff = abs(detected_marker_y - chest_pos_y)
+        diff = detected_marker_y - chest_pos_y
 
-        if diff > 0.20:
-            new_position = 440.0 if self.chest_position == 200 else 200.0
+        if diff > 0.20 and self.chest_position == 200:
+            new_position = 440
+            self.move_chest(new_position)
+            return int(new_position)
+        elif diff < -0.20 and self.chest_position == 440:
+            new_position = 200
             self.move_chest(new_position)
             return int(new_position)
 
@@ -374,7 +378,7 @@ class Ar:
 
         if closest_marker_id is not None:
 
-            if closest_marker_distance < 15 and (
+            if closest_marker_distance < 50 and (
                 self.marker_id != closest_marker_id
             ):
 
@@ -517,8 +521,9 @@ class Ar:
 
                     if self.robot_state == 0:
 
-                        if self.counter in [1, 3, 4]:
+                        if self.counter in [1, 3, 5]:
                             self.local_help_service(1)
+                            self.remote_help_service(3)
                             self.user = 2
                         else:
                             # Call service with help request
@@ -543,8 +548,9 @@ class Ar:
 
                     if self.robot_state == 0:
 
-                        if self.counter in [1, 3, 4]:
+                        if self.counter in [1, 3, 5]:
                             self.local_help_service(2)
+                            self.remote_help_service(3)
                             self.user = 2
                         else:
                             # Call service with help request
