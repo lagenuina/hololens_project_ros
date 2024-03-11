@@ -18,7 +18,7 @@ class Ar:
 
     def __init__(self):
 
-        rospy.init_node("interface")
+        rospy.init_node("object_tracker")
 
         self.bridge = CvBridge()
         self.rate = rospy.Rate(5)

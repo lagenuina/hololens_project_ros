@@ -8,21 +8,21 @@
     <node 
     pkg="holo_project" 
     type="object_tracker.py" 
-    name="interface" 
+    name="object_tracker" 
     output="screen">
     </node>
 
     <node 
     pkg="holo_project" 
-    type="rh_interface_image.py" 
-    name="rh_interface" 
+    type="remote_interface.py" 
+    name="remote_interface" 
     output="screen">
     </node>
 
     <node 
     pkg="holo_project" 
-    type="read_from_csv.py" 
-    name="csv_reader_node" 
+    type="task_manager.py" 
+    name="task_manager" 
     output="screen">
         <param 
         name="task" 
