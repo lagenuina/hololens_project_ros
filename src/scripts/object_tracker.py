@@ -5,11 +5,12 @@ import numpy as np
 from datetime import datetime
 from cv_bridge import (CvBridge, CvBridgeError)
 from std_msgs.msg import (Float32MultiArray, Bool, Int32)
+from std_srvs.srv import (SetBool)
 from sensor_msgs.msg import (Image)
 from geometry_msgs.msg import (Point, Pose)
 from gopher_ros_clearcore.msg import (Position)
 from holo_project.msg import (TargetInfo)
-from Scripts.srv import (UpdateState, UpdateChest, ItemPositionFOV, ConvertTargetPosition, BoolUpdate)
+from Scripts.srv import (UpdateState, UpdateChest, ItemPositionFOV, ConvertTargetPosition)
 
 
 class ObjectTracker:
@@ -106,12 +107,12 @@ class ObjectTracker:
 
         self.__update_target_service = rospy.ServiceProxy(
             '/update_target',
-            BoolUpdate,
+            SetBool,
         )
 
         self.__remote_handling = rospy.ServiceProxy(
             '/remote_handling',
-            BoolUpdate,
+            SetBool,
         )
 
         self.__change_task_state_service = rospy.ServiceProxy(
@@ -219,7 +220,6 @@ class ObjectTracker:
                         self.__DIST_COEFFS,
                     )
 
-                    # print(ids[i], marker_size)
                     ret = rotate_marker_center(rvecs, self.__MARKER_SIZE, tvecs)
 
                     position_target = Float32MultiArray()

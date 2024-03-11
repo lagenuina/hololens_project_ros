@@ -33,7 +33,7 @@ class TaskStateManager:
         # # Service provider:
         rospy.Service(
             '/update_target',
-            BoolUpdate,
+            Empty,
             self.__update_target,
         )
 
@@ -81,7 +81,6 @@ class TaskStateManager:
 
         self.__file_path = '/home/fetch/catkin_workspaces/hololens_ws/src/holo_project/src/scripts/csv files/' + csv_file
 
-        print("Here!")
         self.__csv_data = self.__read_file()
 
     def __update_target(self, request):
@@ -89,18 +88,17 @@ class TaskStateManager:
         self.__update = request.data
         self.__counter += 1
 
-        return True
+        return []
 
     def __read_file(self):
 
-        print("Now here!")
         data = []
 
         with open(self.__file_path, 'r') as csv_file:
 
             reader = csv.reader(csv_file)
             header = next(reader)  # Read the header row
-            print(csv_file)
+
             # Check if the expected columns are present
             expected_columns = ["ID", "Name", "Expiration"]
             if header != expected_columns:
@@ -117,7 +115,7 @@ class TaskStateManager:
                     "expiration": row[2],
                 }
                 data.append(entry)
-        print(data)
+
         return data
 
     def main_loop(self):
