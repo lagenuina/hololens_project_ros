@@ -54,28 +54,6 @@ class TaskStateManager:
 
             csv_file = 'task_sequence.csv'
 
-            rospy.wait_for_service('/data_writer/resume_recording')
-
-            self.__start_image_recording = rospy.ServiceProxy(
-                '/chest_cam/image_writer/resume_recording',
-                Empty,
-            )
-
-            self.__stop_image_recording = rospy.ServiceProxy(
-                '/chest_cam/image_writer/finish_recording',
-                Empty,
-            )
-
-            self.__start_recording = rospy.ServiceProxy(
-                '/data_writer/resume_recording',
-                Empty,
-            )
-
-            self.__stop_recording = rospy.ServiceProxy(
-                '/data_writer/finish_recording',
-                Empty,
-            )
-
         elif self.TASK == 'training':
             csv_file = 'task_sequence_training.csv'
 
@@ -124,10 +102,6 @@ class TaskStateManager:
 
             if self.__task_started and self.__counter == 0:
 
-                if self.TASK == 'study':
-                    self.__start_recording()
-                    self.__start_image_recording()
-
                 self.__task_started = False
 
             target_counter = Int32()
@@ -144,10 +118,6 @@ class TaskStateManager:
                 self.__target_identifier.publish(new_target)
 
         if self.__counter == len(self.__csv_data) and not self.__task_ended:
-
-            if self.TASK == 'study':
-                self.__stop_recording()
-                self.__stop_image_recording()
 
             self.__task_ended = True
 
