@@ -18,7 +18,7 @@ class TaskStateManager:
 
         # # Private CONSTANTS:
         self.__NODE_NAME = node_name
-        
+
         # # Public CONSTANTS:
         self.RATE = rospy.Rate(1)
         self.TASK = task
@@ -48,7 +48,7 @@ class TaskStateManager:
             '/target_counter',
             Int32,
             queue_size=1,
-        )      
+        )
 
         if self.TASK == 'study':
 
@@ -81,8 +81,8 @@ class TaskStateManager:
 
         self.__file_path = '/home/fetch/catkin_workspaces/hololens_ws/src/holo_project/src/scripts/csv files/' + csv_file
 
-        self.__csv_data = self.read_file()
-      
+        print("Here!")
+        self.__csv_data = self.__read_file()
 
     def __update_target(self, request):
 
@@ -91,15 +91,16 @@ class TaskStateManager:
 
         return True
 
-    def read_file(self):
+    def __read_file(self):
 
+        print("Now here!")
         data = []
 
         with open(self.__file_path, 'r') as csv_file:
 
             reader = csv.reader(csv_file)
             header = next(reader)  # Read the header row
-
+            print(csv_file)
             # Check if the expected columns are present
             expected_columns = ["ID", "Name", "Expiration"]
             if header != expected_columns:
@@ -116,7 +117,7 @@ class TaskStateManager:
                     "expiration": row[2],
                 }
                 data.append(entry)
-
+        print(data)
         return data
 
     def main_loop(self):
@@ -125,7 +126,7 @@ class TaskStateManager:
 
             if self.__task_started and self.__counter == 0:
 
-                if self.__TASK == 'study':
+                if self.TASK == 'study':
                     self.__start_recording()
                     self.__start_image_recording()
 
@@ -140,17 +141,18 @@ class TaskStateManager:
                 new_target.id = int(self.__csv_data[self.__counter]['id'])
                 new_target.name = self.__csv_data[self.__counter]['name']
                 new_target.expiration = self.__csv_data[self.__counter
-                                                     ]['expiration']
+                                                       ]['expiration']
 
                 self.__target_identifier.publish(new_target)
 
         if self.__counter == len(self.__csv_data) and not self.__task_ended:
 
-            if self.__TASK == 'study':
+            if self.TASK == 'study':
                 self.__stop_recording()
                 self.__stop_image_recording()
 
             self.__task_ended = True
+
 
 def main():
     """
@@ -174,6 +176,7 @@ def main():
     while not rospy.is_shutdown():
         task_manager.main_loop()
         task_manager.RATE.sleep()
+
 
 if __name__ == '__main__':
     main()

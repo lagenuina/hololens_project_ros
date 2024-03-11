@@ -7,6 +7,7 @@ from cv_bridge import (CvBridge, CvBridgeError)
 from std_msgs.msg import (Float32MultiArray, Int32)
 from sensor_msgs.msg import (Image)
 
+
 class RhInterface:
 
     def __init__(self):
@@ -14,9 +15,7 @@ class RhInterface:
         # # Private CONSTANTS:
         # NOTE: By default all new class CONSTANTS should be private.
         self.__BRIDGE = CvBridge()
-        aruco_dict = cv2.aruco.getPredefinedDictionary(
-            cv2.aruco.DICT_6X6_250
-        )
+        aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_250)
         aruco_params = cv2.aruco.DetectorParameters()
         self.__ARUCO_DETECTOR = cv2.aruco.ArucoDetector(
             aruco_dict,
@@ -42,7 +41,7 @@ class RhInterface:
             "/chest_cam/remote_interface",
             Image,
             queue_size=1,
-        )     
+        )
 
         # # Topic subscriber:
         rospy.Subscriber(
@@ -164,7 +163,7 @@ class RhInterface:
 
                 # Check if the expected columns are present
                 expected_columns = ["ID", "Name", "Expiration"]
-                
+
                 if header != expected_columns:
                     rospy.logerr(
                         f"Error: Expected columns {expected_columns}, but found {header}"
@@ -180,7 +179,7 @@ class RhInterface:
 
         return data
 
-    def __main_loop(self):
+    def main_loop(self):
 
         if self.__image is not None:
             self.__image = self.__image.copy()
@@ -191,7 +190,8 @@ class RhInterface:
                     text = "Grasping"
                     if self.__target_detected:
                         cv2.circle(
-                            self.__image, (self.__object_center[0], self.__object_center[1]),
+                            self.__image,
+                            (self.__object_center[0], self.__object_center[1]),
                             radius=30,
                             color=(0, 255, 0),
                             thickness=2,
@@ -206,7 +206,9 @@ class RhInterface:
                 self.__put_text(text)
 
             else:
-                corners, ids, _ = self.__ARUCO_DETECTOR.detectMarkers(self.__image)
+                corners, ids, _ = self.__ARUCO_DETECTOR.detectMarkers(
+                    self.__image
+                )
                 current_time = rospy.Time.now()
 
                 detected_ids = set()
@@ -253,6 +255,7 @@ class RhInterface:
             )
             self.__image_pub.publish(image)
 
+
 def main():
     """
     """
@@ -266,8 +269,10 @@ def main():
 
     while not rospy.is_shutdown():
 
-        remote_interface.__main_loop()
+        remote_interface.main_loop()
+
         remote_interface.RATE.sleep()
+
 
 if __name__ == "__main__":
 
