@@ -62,7 +62,7 @@ class TaskStateManager:
 
     def __update_target(self, request):
 
-        self.__update = request.data
+        self.__update = True
         self.__counter += 1
 
         return []

@@ -10,17 +10,22 @@ from sensor_msgs.msg import (Image)
 from geometry_msgs.msg import (Point, Pose)
 from gopher_ros_clearcore.msg import (Position)
 from holo_project.msg import (TargetInfo)
-from Scripts.srv import (UpdateState, UpdateChest, ItemPositionFOV, ConvertTargetPosition)
+from Scripts.srv import (
+    UpdateState,
+    ItemPositionFOV,
+    ConvertTargetPosition,
+)
 
 
 class ObjectTracker:
 
-    def __init__(self):
+    def __init__(
+        self,
+        node_name,
+    ):
 
         # # Private CONSTANTS:
-        aruco_dict = cv2.aruco.getPredefinedDictionary(
-            cv2.aruco.DICT_6X6_250
-        )
+        aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_250)
         aruco_params = cv2.aruco.DetectorParameters()
         self.__ARUCO_DETECTOR = cv2.aruco.ArucoDetector(
             aruco_dict,
@@ -36,13 +41,13 @@ class ObjectTracker:
         self.__DIST_COEFFS = np.array([0, 0, 0, 0, 0])
         self.__MARKER_SIZE = 0.03
         self.__BRIDGE = CvBridge()
+        self.__NODE_NAME = node_name
 
         # # Public CONSTANTS:
         self.RATE = rospy.Rate(5)
 
         # # Private variables:
         self.__image = None
-        self.__counter = None
 
         self.__marker_id = None
         self.__previous_marker_id = None
@@ -52,7 +57,6 @@ class ObjectTracker:
         self.__user = 0  #0 robot, 1 remote, 2 local
 
         self.__is_tracking = False
-        self.__is_target_detected = False
         self.__new_target_received = False
         self.__rh_help = False
 
@@ -83,7 +87,7 @@ class ObjectTracker:
             UpdateState,
             self.__local_help,
         )
-    
+
         # # Service subscriber:
         self.__remote_help_service = rospy.ServiceProxy(
             '/remote_help_request_service',
@@ -148,12 +152,6 @@ class ObjectTracker:
         ),
 
         rospy.Subscriber(
-            '/target_counter',
-            Int32,
-            self.__counter_callback,
-        )
-
-        rospy.Subscriber(
             '/chest_cam/camera/color/image_raw',
             Image,
             self.__image_callback,
@@ -178,17 +176,16 @@ class ObjectTracker:
             print(e)
 
         if self.__is_tracking:
+            print("Currently tracking...")
             self.__detect_and_store()
+        else:
+            print("Stopped tracking.")
 
         self.__draw_ar()
-    
+
     def __remote_help_callback(self, message):
 
         self.__rh_help = message.data
-
-    def __counter_callback(self, message):
-
-        self.__counter = message.data
 
     def __target_identifier_callback(self, message):
 
@@ -219,7 +216,11 @@ class ObjectTracker:
 
         self.__is_tracking = not (request.data)
 
-        return True
+        if self.__is_tracking:
+            message = "Object Tracking was resumed."
+        else:
+            message = "Object Tracking was paused."
+        return [True, message]
 
     def __local_help(self, request):
 
@@ -227,7 +228,7 @@ class ObjectTracker:
 
         self.__user = 2
         return True
-        
+
     def __calculate_world_position(self, request):
 
         closest_marker_id = None
@@ -328,7 +329,7 @@ class ObjectTracker:
         return True
 
     def __detect_and_store(self):
-        
+
         # Detect ArUco markers
         corners, ids, _ = self.__ARUCO_DETECTOR.detectMarkers(self.__image)
 
@@ -369,25 +370,27 @@ class ObjectTracker:
 
             corners, ids, _ = self.__ARUCO_DETECTOR.detectMarkers(self.__image)
 
-            if ids is not None and self.__marker_id in ids and not self.__is_expired():
+            if ids is not None and self.__marker_id in ids and not self.__is_expired(
+            ):
 
                 for i in range(len(ids)):
 
                     if ids[i] == self.__marker_id:
 
-                        self.__object_center = [int(np.mean(corners[i][0][:, 0])), int(np.mean(corners[i][0][:, 1]))]
+                        self.__object_center = [
+                            int(np.mean(corners[i][0][:, 0])),
+                            int(np.mean(corners[i][0][:, 1]))
+                        ]
 
-                        self.__detected_markers_centers[self.__marker_id] = self.__object_center
+                        self.__detected_markers_centers[self.__marker_id
+                                                       ] = self.__object_center
 
-                self.__is_target_detected = True
             else:
 
                 if self.__marker_id not in self.__detected_markers_centers:
                     self.__detected_markers_centers[self.__marker_id] = [0, 0]
 
                     self.__object_center = [0, 0]
-
-                    self.__is_target_detected = False
 
             target_position_world.x = np.round(
                 self.__detected_markers_world[self.__marker_id][0], 2
@@ -446,7 +449,7 @@ class ObjectTracker:
                 ) * previous_position
         else:
             return current_position
-        
+
     def main_loop(self):
 
         if self.__new_target_received:
@@ -487,7 +490,8 @@ class ObjectTracker:
         self.__user_control.publish(user_in_charge)
 
     # # Public methods:
-        
+
+
 def rotate_marker_center(rvec, markersize, tvec=None):
     mhalf = markersize / 2.0
 
@@ -503,6 +507,7 @@ def rotate_marker_center(rvec, markersize, tvec=None):
 
     return center_cam_world
 
+
 def main():
     """
     """
@@ -514,11 +519,15 @@ def main():
 
     rospy.loginfo('\n\n\n\n\n')
 
-    object_tracker = ObjectTracker()
+    # # ROS launch file parameters:
+    node_name = rospy.get_name()
+
+    object_tracker = ObjectTracker(node_name=node_name)
 
     while not rospy.is_shutdown():
         object_tracker.main_loop()
         object_tracker.RATE.sleep()
+
 
 if __name__ == "__main__":
     main()
