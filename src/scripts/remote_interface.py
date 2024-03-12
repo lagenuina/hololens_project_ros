@@ -7,7 +7,6 @@ from cv_bridge import (CvBridge, CvBridgeError)
 from std_msgs.msg import (Float32MultiArray, Int32)
 from sensor_msgs.msg import (Image)
 
-
 class RhInterface:
 
     def __init__(self):

@@ -4,7 +4,7 @@ import rospy
 import csv
 from std_msgs.msg import (Int32)
 from Scripts.msg import (TargetInfo)
-from Scripts.srv import (BoolUpdate)
+from Scripts.srv import (UpdateState)
 from std_srvs.srv import (Empty)
 
 
@@ -25,7 +25,7 @@ class TaskStateManager:
 
         # # Private variables:
         # NOTE: By default all new class variables should be private.
-        self.__counter = -2
+        self.__counter = -1
         self.__task_started = True
         self.__task_ended = False
         self.__update = False
@@ -51,7 +51,6 @@ class TaskStateManager:
         )
 
         if self.TASK == 'study':
-
             csv_file = 'task_sequence.csv'
 
         elif self.TASK == 'training':

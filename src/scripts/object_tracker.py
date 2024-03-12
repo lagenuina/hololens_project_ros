@@ -43,26 +43,18 @@ class ObjectTracker:
         # # Private variables:
         self.__image = None
         self.__counter = None
-        self.__chest_position = 440.0
 
         self.__marker_id = None
         self.__previous_marker_id = None
         self.__expiration = None
         self.__object_center = []
-        self.__state = 0
         self.__robot_state = 0  # Running
         self.__user = 0  #0 robot, 1 remote, 2 local
 
-        self.__adjusting_chest = False
+        self.__is_tracking = False
         self.__is_target_detected = False
-        self.__on_startup = True
         self.__new_target_received = False
         self.__rh_help = False
-
-        self.__chest_cam_anchor_tf = {
-            'position': np.array([0.0, 0.0, 0.0]),
-            'orientation': np.array([0.0, 0.0, 0.0, 1.0]),
-        }
 
         # Create dictionary to store position of detected markers
         self.__detected_markers_world = {}
@@ -70,15 +62,14 @@ class ObjectTracker:
 
         # # Service provider:
         rospy.Service(
+            f'{self.__NODE_NAME}/pause',
+            SetBool,
+            self.__pause_object_tracking,
+        )
+        rospy.Service(
             '/resume_task',
             UpdateState,
             self.__resume_task,
-        )
-
-        rospy.Service(
-            '/update_chest',
-            UpdateChest,
-            self.__update_chest,
         )
 
         rospy.Service(
@@ -91,12 +82,6 @@ class ObjectTracker:
             '/local_request',
             UpdateState,
             self.__local_help,
-        )
-
-        rospy.Service(
-            '/move_chest',
-            UpdateState,
-            self.__move_chest_remote,
         )
     
         # # Service subscriber:
@@ -163,12 +148,6 @@ class ObjectTracker:
         ),
 
         rospy.Subscriber(
-            f'/my_gen3/pick_and_place',
-            Int32,
-            self.__robot_pick_and_place_callback,
-        )
-
-        rospy.Subscriber(
             '/target_counter',
             Int32,
             self.__counter_callback,
@@ -178,12 +157,6 @@ class ObjectTracker:
             '/chest_cam/camera/color/image_raw',
             Image,
             self.__image_callback,
-        ),
-
-        rospy.Subscriber(
-            '/my_gen3/tf_chest_cam_anchor',
-            Pose,
-            self.__tf_chest_cam_anchor_callback,
         ),
 
         rospy.Subscriber(
@@ -204,53 +177,14 @@ class ObjectTracker:
         except CvBridgeError as e:
             print(e)
 
-        if not self.__adjusting_chest:
-
-            # Detect ArUco markers
-            corners, ids, _ = self.__ARUCO_DETECTOR.detectMarkers(self.__image)
-
-            if ids is not None:
-                for i in range(len(ids)):
-
-                    # Calculate World position ID
-                    rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(
-                        corners[i],
-                        self.__MARKER_SIZE,
-                        self.__CAMERA_MATRIX,
-                        self.__DIST_COEFFS,
-                    )
-
-                    ret = rotate_marker_center(rvecs, self.__MARKER_SIZE, tvecs)
-
-                    position_target = Float32MultiArray()
-                    position_target.data = [ret[0], ret[1], ret[2] + 0.05]
-
-                    target = self.__convert_target_service(position_target)
-
-                    # Apply the low-pass filter
-                    filtered_position = self.__apply_low_pass_filter(
-                        np.array(target.fromanchor.data),
-                        ids[i][0],
-                        alpha=0.1,
-                    )
-
-                    # Store the position in the dictionary
-                    self.__detected_markers_world[ids[i][0]] = filtered_position
+        if self.__is_tracking:
+            self.__detect_and_store()
 
         self.__draw_ar()
     
-    def __robot_pick_and_place_callback(self, message):
-
-        self.__state = message.data
-
     def __remote_help_callback(self, message):
 
         self.__rh_help = message.data
-
-    def __tf_chest_cam_anchor_callback(self, message):
-        self.__chest_cam_anchor_tf['position'][0] = message.position.x
-        self.__chest_cam_anchor_tf['position'][1] = message.position.y
-        self.__chest_cam_anchor_tf['position'][2] = message.position.z
 
     def __counter_callback(self, message):
 
@@ -265,32 +199,6 @@ class ObjectTracker:
 
             self.__new_target_received = True
             self.__previous_marker_id = self.__marker_id
-
-    def __update_chest(self, request):
-
-        detected_marker_y = self.__detected_markers_world[self.__marker_id][1]
-        chest_pos_y = self.__chest_cam_anchor_tf['position'][1]
-        diff = detected_marker_y - chest_pos_y
-
-        if diff > 0.20 and self.__chest_position == 200:
-            new_position = 440
-            self.__move_chest(new_position)
-            return int(new_position)
-        elif diff < -0.20 and self.__chest_position == 440:
-            new_position = 200
-            self.__move_chest(new_position)
-            return int(new_position)
-
-        elif self.__state == 3 and self.__chest_position == 440:
-            self.__move_chest(200.0)
-            return 200
-
-        elif detected_marker_y - chest_pos_y < -0.10 and self.__chest_position == 440:
-
-            self.__move_chest(200.0)
-            return 200
-
-        return int(self.__chest_position)
 
     def __resume_task(self, request):
 
@@ -307,22 +215,19 @@ class ObjectTracker:
 
         return True
 
+    def __pause_object_tracking(self, request):
+
+        self.__is_tracking = not (request.data)
+
+        return True
+
     def __local_help(self, request):
 
         self.__local_help_service(request.state)
 
         self.__user = 2
         return True
-    
-    def __move_chest_remote(self, request):
-
-        if request.state == 0 and self.__chest_position == 200:
-            self.__move_chest(440.0)
-        elif request.state == 1 and self.__chest_position == 440:
-            self.__move_chest(200.0)
-
-        return True
-    
+        
     def __calculate_world_position(self, request):
 
         closest_marker_id = None
@@ -421,6 +326,39 @@ class ObjectTracker:
                                                ] = [center[0], center[1]]
 
         return True
+
+    def __detect_and_store(self):
+        
+        # Detect ArUco markers
+        corners, ids, _ = self.__ARUCO_DETECTOR.detectMarkers(self.__image)
+
+        if ids is not None:
+            for i in range(len(ids)):
+
+                # Calculate World position ID
+                rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(
+                    corners[i],
+                    self.__MARKER_SIZE,
+                    self.__CAMERA_MATRIX,
+                    self.__DIST_COEFFS,
+                )
+
+                ret = rotate_marker_center(rvecs, self.__MARKER_SIZE, tvecs)
+
+                position_target = Float32MultiArray()
+                position_target.data = [ret[0], ret[1], ret[2] + 0.05]
+
+                target = self.__convert_target_service(position_target)
+
+                # Apply the low-pass filter
+                filtered_position = self.__apply_low_pass_filter(
+                    np.array(target.fromanchor.data),
+                    ids[i][0],
+                    alpha=0.1,
+                )
+
+                # Store the position in the dictionary
+                self.__detected_markers_world[ids[i][0]] = filtered_position
 
     def __draw_ar(self):
 
@@ -548,30 +486,7 @@ class ObjectTracker:
         user_in_charge.data = self.__user
         self.__user_control.publish(user_in_charge)
 
-    def __move_chest(self, desired_position):
-
-        self.__adjusting_chest = True
-
-        chest_pos = Position()
-        chest_pos.position = desired_position
-        chest_pos.velocity = 1.0
-        self.__chest_position.publish(chest_pos)
-
-        self.__chest_position = desired_position
-
-        rospy.sleep(5)
-
-        self.__adjusting_chest = False
-
     # # Public methods:
-    def adjust_chest(self):
-
-        if self.__counter == -1 and self.__on_startup:
-
-            self.__move_chest(200.0)
-            self.__on_startup = False
-
-            self.__update_target_service(True)
         
 def rotate_marker_center(rvec, markersize, tvec=None):
     mhalf = markersize / 2.0
@@ -603,7 +518,6 @@ def main():
 
     while not rospy.is_shutdown():
         object_tracker.main_loop()
-        object_tracker.adjust_chest()
         object_tracker.RATE.sleep()
 
 if __name__ == "__main__":
