@@ -5,15 +5,15 @@ import numpy as np
 from datetime import datetime
 from cv_bridge import (CvBridge, CvBridgeError)
 from std_msgs.msg import (Float32MultiArray, Bool, Int32)
-from std_srvs.srv import (SetBool)
-from sensor_msgs.msg import (Image)
-from geometry_msgs.msg import (Point, Pose)
-from gopher_ros_clearcore.msg import (Position)
+from std_srvs.srv import (SetBool, Empty)
+from sensor_msgs.msg import (Image, CameraInfo)
+from geometry_msgs.msg import (Point)
 from holo_project.msg import (TargetInfo)
 from Scripts.srv import (
     UpdateState,
     ItemPositionFOV,
     ConvertTargetPosition,
+    SendFloat32MultiArray,
 )
 
 
@@ -22,6 +22,7 @@ class ObjectTracker:
     def __init__(
         self,
         node_name,
+        anchor_id,
     ):
 
         # # Private CONSTANTS:
@@ -44,10 +45,11 @@ class ObjectTracker:
         self.__NODE_NAME = node_name
 
         # # Public CONSTANTS:
-        self.RATE = rospy.Rate(5)
+        self.RATE = rospy.Rate(10)
 
         # # Private variables:
         self.__image = None
+        self.__depth_image = None
 
         self.__marker_id = None
         self.__previous_marker_id = None
@@ -59,6 +61,9 @@ class ObjectTracker:
         self.__is_tracking = False
         self.__new_target_received = False
         self.__rh_help = False
+
+        self.__is_anchor_set = False
+        self.ANCHOR_ID = anchor_id
 
         # Create dictionary to store position of detected markers
         self.__detected_markers_world = {}
@@ -75,7 +80,11 @@ class ObjectTracker:
             UpdateState,
             self.__resume_task,
         )
-
+        rospy.Service(
+            '/resume_task_local',
+            Empty,
+            self.__resume_task_local,
+        )
         rospy.Service(
             '/calculate_world_position_service',
             ItemPositionFOV,
@@ -89,19 +98,19 @@ class ObjectTracker:
         )
 
         # # Service subscriber:
-        self.__remote_help_service = rospy.ServiceProxy(
-            '/remote_help_request_service',
-            UpdateState,
-        )
-
         self.__update_target_service = rospy.ServiceProxy(
             '/update_target',
-            SetBool,
+            Empty,
         )
 
         self.__remote_handling = rospy.ServiceProxy(
             '/remote_handling',
             SetBool,
+        )
+
+        self.__remote_help_service = rospy.ServiceProxy(
+            '/remote_help_request_service',
+            UpdateState,
         )
 
         self.__change_task_state_service = rospy.ServiceProxy(
@@ -119,6 +128,11 @@ class ObjectTracker:
             UpdateState,
         )
 
+        self.__set_anchor_service = rospy.ServiceProxy(
+            '/set_anchor',
+            SendFloat32MultiArray,
+        )
+
         # # Topic publisher:
         self.__target_camera_pub = rospy.Publisher(
             '/my_gen3/target_workspace_cam',
@@ -132,12 +146,6 @@ class ObjectTracker:
             queue_size=1,
         )
 
-        self.__chest_position = rospy.Publisher(
-            'z_chest_pos',
-            Position,
-            queue_size=1,
-        )
-
         self.__user_control = rospy.Publisher(
             '/user_control',
             Int32,
@@ -146,7 +154,7 @@ class ObjectTracker:
 
         # # Topic subscriber:
         rospy.Subscriber(
-            '/target_identifier',
+            '/task_manager/target_identifier',
             TargetInfo,
             self.__target_identifier_callback,
         ),
@@ -162,6 +170,22 @@ class ObjectTracker:
             Bool,
             self.__remote_help_callback,
         ),
+        rospy.Subscriber(
+            '/chest_cam/camera/aligned_depth_to_color/image_raw',
+            Image,
+            self.__depth_image_callback,
+        )
+
+    def __depth_image_callback(self, data):
+
+        try:
+            # Convert depth image to a CV2 image (16UC1 encoding typically used for depth images)
+            self.__depth_image = self.__BRIDGE.imgmsg_to_cv2(
+                data, desired_encoding="16UC1"
+            )
+
+        except CvBridgeError as e:
+            rospy.logerr("CvBridge Error: {0}".format(e))
 
     def __image_callback(self, data):
 
@@ -176,10 +200,7 @@ class ObjectTracker:
             print(e)
 
         if self.__is_tracking:
-            print("Currently tracking...")
             self.__detect_and_store()
-        else:
-            print("Stopped tracking.")
 
         self.__draw_ar()
 
@@ -197,6 +218,14 @@ class ObjectTracker:
             self.__new_target_received = True
             self.__previous_marker_id = self.__marker_id
 
+    def __resume_task_local(self, request):
+
+        self.__robot_state = 0
+        self.__update_target_service()
+        self.__user = 0
+
+        return []
+
     def __resume_task(self, request):
 
         self.__robot_state = 0
@@ -205,7 +234,7 @@ class ObjectTracker:
             self.__remote_handling(True)
             self.__change_task_state_service(0)
         else:
-            self.__update_target_service(True)
+            self.__update_target_service()
             self.__remote_help_service(0)
 
         self.__user = 0
@@ -313,6 +342,25 @@ class ObjectTracker:
                     self.__DIST_COEFFS,
                 )
 
+                marker_center = np.mean(
+                    corners_target[0], axis=0
+                )  # Average corners to get center
+
+                if self.__depth_image is not None:
+                    # Get the depth value at the mapped coordinates
+                    depth_value = self.__depth_image[int(marker_center[1]),
+                                                     int(marker_center[0])]
+
+                    # Convert depth value from millimeters to meters (if needed)
+                    depth_value_meters = depth_value / 1000.0
+
+                    if depth_value_meters > 0 and abs(
+                        depth_value_meters - tvecs[0][0][2]
+                    ) < 0.1:
+
+                        # Set the depth value in the translation vector
+                        tvecs[0][0][2] = depth_value_meters + 0.06
+
                 ret = rotate_marker_center(rvecs, self.__MARKER_SIZE, tvecs)
 
                 position_target = Float32MultiArray()
@@ -336,7 +384,11 @@ class ObjectTracker:
         if ids is not None:
             for i in range(len(ids)):
 
-                # Calculate World position ID
+                marker_center = np.mean(
+                    corners[i][0], axis=0
+                )  # Average corners to get center
+
+                # Estimate pose of the marker
                 rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(
                     corners[i],
                     self.__MARKER_SIZE,
@@ -344,22 +396,49 @@ class ObjectTracker:
                     self.__DIST_COEFFS,
                 )
 
+                if self.__depth_image is not None:
+                    # Get the depth value at the mapped coordinates
+                    depth_value = self.__depth_image[int(marker_center[1]),
+                                                     int(marker_center[0])]
+
+                    # Convert depth value from millimeters to meters (if needed)
+                    depth_value_meters = depth_value / 1000.0
+
+                    if depth_value_meters > 0 and abs(
+                        depth_value_meters - tvecs[0][0][2]
+                    ) < 0.1:
+                        # Set the depth value in the translation vector
+                        tvecs[0][0][2] = depth_value_meters + 0.06
+
                 ret = rotate_marker_center(rvecs, self.__MARKER_SIZE, tvecs)
 
                 position_target = Float32MultiArray()
                 position_target.data = [ret[0], ret[1], ret[2] + 0.05]
 
-                target = self.__convert_target_service(position_target)
+                if not self.__is_anchor_set:
 
-                # Apply the low-pass filter
-                filtered_position = self.__apply_low_pass_filter(
-                    np.array(target.fromanchor.data),
-                    ids[i][0],
-                    alpha=0.1,
-                )
+                    if ids[i] == self.ANCHOR_ID:
+                        self.__set_anchor_service(position_target)
+                        self.__is_anchor_set = True
 
-                # Store the position in the dictionary
-                self.__detected_markers_world[ids[i][0]] = filtered_position
+                        rospy.sleep(5)
+
+                        print("")
+                        rospy.loginfo(f'\033[92mReady to start!\033[0m',)
+
+                else:
+
+                    target = self.__convert_target_service(position_target)
+
+                    # Apply the low-pass filter
+                    filtered_position = self.__apply_low_pass_filter(
+                        np.array(target.fromanchor.data),
+                        ids[i][0],
+                        alpha=0.1,
+                    )
+
+                    # Store the position in the dictionary
+                    self.__detected_markers_world[ids[i][0]] = filtered_position
 
     def __draw_ar(self):
 
@@ -409,11 +488,10 @@ class ObjectTracker:
 
         else:
 
-            if self.__robot_state != 0:
-
-                target_position_world.x = 0
-                target_position_world.y = 0
-                target_position_world.z = 0
+            # if self.__robot_state != 0:
+            target_position_world.x = 100
+            target_position_world.y = 100
+            target_position_world.z = 100
 
         self.__target_camera_pub.publish(target_position_world)
 
@@ -441,7 +519,6 @@ class ObjectTracker:
             previous_position = self.__detected_markers_world[marker_id]
 
             if (np.linalg.norm(current_position - previous_position)) > 0.03:
-
                 return previous_position
             else:
                 return alpha * current_position + (
@@ -456,12 +533,17 @@ class ObjectTracker:
 
             if self.__marker_id not in self.__detected_markers_world:
 
+                print(self.__marker_id, self.__detected_markers_world)
+                print("Robot state", self.__robot_state)
+
                 if self.__marker_id is not None:
 
                     if self.__robot_state == 0:
 
                         # Call service with help request
-                        self.__remote_help_service(1)
+                        # self.__remote_help_service(1)
+                        self.__local_help_service(1)
+
                         self.__change_task_state_service(1)
 
                         self.__robot_state = 1
@@ -471,7 +553,9 @@ class ObjectTracker:
                 if self.__is_expired():
 
                     if self.__robot_state == 0:
-                        self.__remote_help_service(2)
+                        # self.__remote_help_service(2)
+                        self.__local_help_service(2)
+
                         self.__change_task_state_service(2)
                         self.__robot_state = 2
 
@@ -522,7 +606,9 @@ def main():
     # # ROS launch file parameters:
     node_name = rospy.get_name()
 
-    object_tracker = ObjectTracker(node_name=node_name)
+    id = rospy.get_param(param_name=f'{rospy.get_name()}/anchor_id')
+
+    object_tracker = ObjectTracker(node_name=node_name, anchor_id=id)
 
     while not rospy.is_shutdown():
         object_tracker.main_loop()

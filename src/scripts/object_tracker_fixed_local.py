@@ -93,7 +93,7 @@ class Ar:
         )
 
         rospy.Subscriber(
-            '/target_counter',
+            '/task_manager/target_counter',
             Int32,
             self.counter_callback,
         )

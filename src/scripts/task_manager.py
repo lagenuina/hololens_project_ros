@@ -20,7 +20,7 @@ class TaskStateManager:
         self.__NODE_NAME = node_name
 
         # # Public CONSTANTS:
-        self.RATE = rospy.Rate(1)
+        self.RATE = rospy.Rate(70)
         self.TASK = task
 
         # # Private variables:
@@ -39,13 +39,13 @@ class TaskStateManager:
 
         # # Topic publisher:
         self.__target_identifier = rospy.Publisher(
-            '/target_identifier',
+            f'/{self.__NODE_NAME}/target_identifier',
             TargetInfo,
             queue_size=1,
         )
 
         self.__target_counter = rospy.Publisher(
-            '/target_counter',
+            f'/{self.__NODE_NAME}/target_counter',
             Int32,
             queue_size=1,
         )
@@ -103,10 +103,6 @@ class TaskStateManager:
 
                 self.__task_started = False
 
-            target_counter = Int32()
-            target_counter.data = self.__counter
-            self.__target_counter.publish(target_counter)
-
             if self.__counter >= 0:
                 new_target = TargetInfo()
                 new_target.id = int(self.__csv_data[self.__counter]['id'])
@@ -119,6 +115,10 @@ class TaskStateManager:
         if self.__counter == len(self.__csv_data) and not self.__task_ended:
 
             self.__task_ended = True
+
+        target_counter = Int32()
+        target_counter.data = self.__counter
+        self.__target_counter.publish(target_counter)
 
 
 def main():

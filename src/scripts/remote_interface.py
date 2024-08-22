@@ -7,6 +7,7 @@ from cv_bridge import (CvBridge, CvBridgeError)
 from std_msgs.msg import (Float32MultiArray, Int32)
 from sensor_msgs.msg import (Image)
 
+
 class RhInterface:
 
     def __init__(self):
@@ -24,7 +25,7 @@ class RhInterface:
         self.__OBJECTS_INFO = self.__read_file()
 
         # # Public CONSTANTS:
-        self.RATE = rospy.Rate(100)
+        self.RATE = rospy.Rate(10)
 
         # # Private variables:
         # NOTE: By default all new class variables should be private.
@@ -39,7 +40,7 @@ class RhInterface:
         self.__image_pub = rospy.Publisher(
             "/chest_cam/remote_interface",
             Image,
-            queue_size=1,
+            queue_size=10,
         )
 
         # # Topic subscriber:
@@ -56,7 +57,7 @@ class RhInterface:
         ),
 
         rospy.Subscriber(
-            '/my_gen3/pick_and_place',
+            'my_gen3/robot_control/current_task_state',
             Int32,
             self.__robot_state_callback,
         )
@@ -200,6 +201,10 @@ class RhInterface:
                 elif self.__state == 3:
                     text = "Placing"
                 elif self.__state == 4:
+                    text = "Placing"
+                elif self.__state == 5:
+                    text = "Placed"
+                elif self.__state == 6:
                     text = "Placed"
 
                 self.__put_text(text)
