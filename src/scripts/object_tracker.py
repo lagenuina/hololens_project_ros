@@ -202,8 +202,6 @@ class ObjectTracker:
         if self.__is_tracking:
             self.__detect_and_store()
 
-        self.__draw_ar()
-
     def __remote_help_callback(self, message):
 
         self.__rh_help = message.data
@@ -440,7 +438,7 @@ class ObjectTracker:
                     # Store the position in the dictionary
                     self.__detected_markers_world[ids[i][0]] = filtered_position
 
-    def __draw_ar(self):
+    def __publish_target_pose(self):
 
         target_position_world = Point()
 
@@ -529,20 +527,23 @@ class ObjectTracker:
 
     def main_loop(self):
 
+        self.__publish_target_pose()
+
         if self.__new_target_received:
 
-            if self.__marker_id not in self.__detected_markers_world:
+            assign_to = np.random.randint(1, 3)
 
-                print(self.__marker_id, self.__detected_markers_world)
-                print("Robot state", self.__robot_state)
+            if self.__marker_id not in self.__detected_markers_world:
 
                 if self.__marker_id is not None:
 
                     if self.__robot_state == 0:
 
-                        # Call service with help request
-                        # self.__remote_help_service(1)
-                        self.__local_help_service(1)
+                        if assign_to == 1:
+                            # Call service with help request
+                            self.__remote_help_service(1)
+                        elif assign_to == 2:
+                            self.__local_help_service(1)
 
                         self.__change_task_state_service(1)
 
@@ -553,8 +554,12 @@ class ObjectTracker:
                 if self.__is_expired():
 
                     if self.__robot_state == 0:
-                        # self.__remote_help_service(2)
-                        self.__local_help_service(2)
+
+                        if assign_to == 1:
+                            # Call service with help request
+                            self.__remote_help_service(2)
+                        elif assign_to == 2:
+                            self.__local_help_service(2)
 
                         self.__change_task_state_service(2)
                         self.__robot_state = 2

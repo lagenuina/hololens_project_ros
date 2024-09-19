@@ -47,6 +47,10 @@
         </include>
     </group>
 
+    <!-- See install instructions here: https://github.com/ethz-asl/image_undistort -->
+    <include file="$(find image_undistort)/launch/undistort_realsense.launch" >
+    </include>
+
     <include file="$(find ros_tcp_endpoint)/launch/endpoint_lh_rh.launch" >
     </include>
 
