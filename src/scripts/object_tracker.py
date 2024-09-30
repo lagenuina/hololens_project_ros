@@ -3,6 +3,7 @@ import rospy
 import cv2
 import numpy as np
 from datetime import datetime
+import time
 from cv_bridge import (CvBridge, CvBridgeError)
 from std_msgs.msg import (Float32MultiArray, Bool, Int32)
 from std_srvs.srv import (SetBool, Empty)
@@ -57,11 +58,12 @@ class ObjectTracker:
         self.__object_center = []
         self.__robot_state = 0  # Running
         self.__user = 0  #0 robot, 1 remote, 2 local
+        self.__boxes = [100, 101, 102]
 
         self.__is_tracking = False
         self.__new_target_received = False
         self.__rh_help = False
-
+        self.__restoking = False
         self.__is_anchor_set = False
         self.ANCHOR_ID = anchor_id
 
@@ -95,6 +97,12 @@ class ObjectTracker:
             '/local_request',
             UpdateState,
             self.__local_help,
+        )
+
+        rospy.Service(
+            '/grasp_failure',
+            Empty,
+            self.__grasp_failure,
         )
 
         # # Service subscriber:
@@ -199,7 +207,7 @@ class ObjectTracker:
         except CvBridgeError as e:
             print(e)
 
-        if self.__is_tracking:
+        if self.__is_tracking and not self.__restoking:
             self.__detect_and_store()
 
     def __remote_help_callback(self, message):
@@ -212,6 +220,13 @@ class ObjectTracker:
         self.__expiration = message.expiration
 
         if self.__marker_id != self.__previous_marker_id:
+
+            if self.__marker_id == 4:
+                self.__restoking = True
+
+                # Empty all previously collected target poses
+                self.__detected_markers_world.clear()
+                self.__detected_markers_centers.clear()
 
             self.__new_target_received = True
             self.__previous_marker_id = self.__marker_id
@@ -238,6 +253,20 @@ class ObjectTracker:
         self.__user = 0
 
         return True
+
+    def __grasp_failure(self, request):
+
+        # assign_to = np.random.randint(1, 3)
+        assign_to = 1
+
+        if assign_to == 1:
+            self.__remote_help_service(4)
+        elif assign_to == 2:
+            self.__local_help_service(4)
+
+        self.__robot_state = 4
+
+        return []
 
     def __pause_object_tracking(self, request):
 
@@ -352,17 +381,17 @@ class ObjectTracker:
                     # Convert depth value from millimeters to meters (if needed)
                     depth_value_meters = depth_value / 1000.0
 
-                    if depth_value_meters > 0 and abs(
-                        depth_value_meters - tvecs[0][0][2]
-                    ) < 0.1:
+                    if depth_value_meters > 0:
 
                         # Set the depth value in the translation vector
-                        tvecs[0][0][2] = depth_value_meters + 0.06
+                        tvecs[0][0][2] = depth_value_meters
 
-                ret = rotate_marker_center(rvecs, self.__MARKER_SIZE, tvecs)
+                # ret = rotate_marker_center(rvecs, self.__MARKER_SIZE, tvecs)
 
                 position_target = Float32MultiArray()
-                position_target.data = ret
+                position_target.data = position_target.data = [
+                    tvecs[0][0][0], tvecs[0][0][1], depth_value_meters + 0.12
+                ]
 
                 target = self.__convert_target_service(position_target)
                 target = np.array(target.fromanchor.data)
@@ -402,16 +431,17 @@ class ObjectTracker:
                     # Convert depth value from millimeters to meters (if needed)
                     depth_value_meters = depth_value / 1000.0
 
-                    if depth_value_meters > 0 and abs(
-                        depth_value_meters - tvecs[0][0][2]
-                    ) < 0.1:
-                        # Set the depth value in the translation vector
-                        tvecs[0][0][2] = depth_value_meters + 0.06
+                    # if depth_value_meters > 0:
+                    #     # Set the depth value in the translation vector
+                    #     tvecs[0][0][2] = depth_value_meters
 
-                ret = rotate_marker_center(rvecs, self.__MARKER_SIZE, tvecs)
+                # ret = rotate_marker_center(rvecs, self.__MARKER_SIZE, tvecs)
+                # print(ids[i], tvecs[0][0][2], depth_value_meters)
 
                 position_target = Float32MultiArray()
-                position_target.data = [ret[0], ret[1], ret[2] + 0.05]
+                position_target.data = [
+                    tvecs[0][0][0], tvecs[0][0][1], depth_value_meters + 0.12
+                ]
 
                 if not self.__is_anchor_set:
 
@@ -525,49 +555,84 @@ class ObjectTracker:
         else:
             return current_position
 
+    def __send_help_request(self, assign_to, error_code):
+
+        if assign_to == 1:
+            self.__remote_help_service(error_code)
+        elif assign_to == 2:
+            self.__local_help_service(error_code)
+
+        self.__change_task_state_service(error_code)
+        self.__robot_state = error_code
+
+    def __start_restocking(self):
+
+        if self.__restoking:
+            # Start the timer when restocking is initiated
+            if not hasattr(self, 'restocking_start_time'):
+                print("Start restocking!")
+                self.restocking_start_time = time.time()
+                self.last_print_time = self.restocking_start_time  # To track last time a message was printed
+
+            # Calculate elapsed time since restocking started
+            elapsed_time = time.time() - self.restocking_start_time
+            remaining_time = 60 - elapsed_time  # Calculate remaining time
+
+            # Check if 60 seconds have passed since restocking started
+            if elapsed_time >= 60:
+                self.__restoking = False
+                print("Restocking finished.")
+                del self.restocking_start_time  # Clear the timer
+                del self.last_print_time  # Clear the last print time
+            else:
+                # Print the remaining time every 20 seconds
+                if time.time() - self.last_print_time >= 20:
+                    print(
+                        f"Time left for restocking: {int(remaining_time + 1)} seconds"
+                    )
+                    self.last_print_time = time.time()  # Update last print time
+
     def main_loop(self):
 
         self.__publish_target_pose()
 
-        if self.__new_target_received:
+        if self.__restoking:
+            self.__start_restocking()
 
-            assign_to = np.random.randint(1, 3)
+        if self.__new_target_received and not self.__restoking:
 
-            if self.__marker_id not in self.__detected_markers_world:
+            # assign_to = np.random.randint(1, 3)
+            assign_to = 1
 
-                if self.__marker_id is not None:
+            if self.__marker_id is not None and self.__robot_state == 0:
 
-                    if self.__robot_state == 0:
+                if self.__marker_id not in self.__detected_markers_world:
 
-                        if assign_to == 1:
-                            # Call service with help request
-                            self.__remote_help_service(1)
-                        elif assign_to == 2:
-                            self.__local_help_service(1)
-
-                        self.__change_task_state_service(1)
-
-                        self.__robot_state = 1
-
-            else:
-                # Check expiration date
-                if self.__is_expired():
-
-                    if self.__robot_state == 0:
-
-                        if assign_to == 1:
-                            # Call service with help request
-                            self.__remote_help_service(2)
-                        elif assign_to == 2:
-                            self.__local_help_service(2)
-
-                        self.__change_task_state_service(2)
-                        self.__robot_state = 2
+                    # Failure 1 - Marker not detected/misplaced
+                    self.__send_help_request(assign_to, 1)
 
                 else:
-                    self.__change_task_state_service(0)
+                    if self.__is_expired():
 
-                    self.__user = 0
+                        # Failure 2 - Medicine is expired
+                        self.__send_help_request(assign_to, 2)
+
+                    elif self.__marker_id in self.__boxes:
+
+                        if assign_to == 1:
+                            self.__update_target_service()
+                            self.__user = 0
+
+                            # TO ADD - record as a failure
+                        else:
+                            # Failure 3 - Medicine is ungraspable
+                            self.__send_help_request(assign_to, 3)
+
+                    else:
+
+                        # No failure
+                        self.__change_task_state_service(0)
+                        self.__user = 0
 
             self.__new_target_received = False
 

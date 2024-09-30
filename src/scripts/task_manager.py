@@ -103,7 +103,7 @@ class TaskStateManager:
 
                 self.__task_started = False
 
-            if self.__counter >= 0:
+            if self.__counter >= 0 and self.__counter < 18:
                 new_target = TargetInfo()
                 new_target.id = int(self.__csv_data[self.__counter]['id'])
                 new_target.name = self.__csv_data[self.__counter]['name']

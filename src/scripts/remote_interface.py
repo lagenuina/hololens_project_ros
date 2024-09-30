@@ -206,6 +206,8 @@ class RhInterface:
                     text = "Placed"
                 elif self.__state == 6:
                     text = "Placed"
+                elif self.__state == 7:
+                    text = ""
 
                 self.__put_text(text)
 
