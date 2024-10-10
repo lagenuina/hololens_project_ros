@@ -186,7 +186,7 @@ class RhInterface:
 
             if self.__state != 0:
 
-                if self.__state == 1:
+                if self.__state == 1 or self.__state == 2:
                     text = "Grasping"
                     if self.__target_detected:
                         cv2.circle(
@@ -196,10 +196,8 @@ class RhInterface:
                             color=(0, 255, 0),
                             thickness=2,
                         )
-                elif self.__state == 2:
-                    text = "Grasped"
                 elif self.__state == 3:
-                    text = "Placing"
+                    text = "Grasped"
                 elif self.__state == 4:
                     text = "Placing"
                 elif self.__state == 5:

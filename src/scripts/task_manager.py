@@ -13,7 +13,7 @@ class TaskStateManager:
     def __init__(
         self,
         node_name,
-        task,
+        study,
     ):
 
         # # Private CONSTANTS:
@@ -21,7 +21,13 @@ class TaskStateManager:
 
         # # Public CONSTANTS:
         self.RATE = rospy.Rate(70)
-        self.TASK = task
+
+        print(study)
+        if study:
+            self.TASK = 'study'
+        else:
+            self.TASK = 'training'
+            print("Task:", self.TASK)
 
         # # Private variables:
         # NOTE: By default all new class variables should be private.
@@ -35,6 +41,17 @@ class TaskStateManager:
             '/update_target',
             Empty,
             self.__update_target,
+        )
+
+        self.__start_task_service = rospy.ServiceProxy('/task_started', Empty)
+
+        self.__start_recording = rospy.ServiceProxy(
+            '/data_writer/resume_recording',
+            Empty,
+        )
+        self.__stop_recording = rospy.ServiceProxy(
+            '/data_writer/finish_recording',
+            Empty,
         )
 
         # # Topic publisher:
@@ -101,6 +118,9 @@ class TaskStateManager:
 
             if self.__task_started and self.__counter == 0:
 
+                self.__start_task_service()
+                self.__start_recording()
+
                 self.__task_started = False
 
             if self.__counter >= 0 and self.__counter < 18:
@@ -114,6 +134,7 @@ class TaskStateManager:
 
         if self.__counter == len(self.__csv_data) and not self.__task_ended:
 
+            self.__stop_recording()
             self.__task_ended = True
 
         target_counter = Int32()
@@ -134,11 +155,14 @@ def main():
 
     # # ROS parameters:
     current_task = rospy.get_param(
-        param_name=f'{rospy.get_name()}/task',
-        default='study',
+        param_name=f'{rospy.get_name()}/study',
+        default='false',
     )
 
-    task_manager = TaskStateManager(node_name='task_manager', task=current_task)
+    task_manager = TaskStateManager(
+        node_name='task_manager',
+        study=current_task,
+    )
 
     while not rospy.is_shutdown():
         task_manager.main_loop()

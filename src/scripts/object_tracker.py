@@ -15,6 +15,7 @@ from Scripts.srv import (
     ItemPositionFOV,
     ConvertTargetPosition,
     SendFloat32MultiArray,
+    ReceiveInt,
 )
 
 
@@ -24,6 +25,7 @@ class ObjectTracker:
         self,
         node_name,
         anchor_id,
+        task,
     ):
 
         # # Private CONSTANTS:
@@ -57,15 +59,21 @@ class ObjectTracker:
         self.__expiration = None
         self.__object_center = []
         self.__robot_state = 0  # Running
-        self.__user = 0  #0 robot, 1 remote, 2 local
         self.__boxes = [100, 101, 102]
 
+        self.__error_code = 0
+        self.__assign_to = 0
         self.__is_tracking = False
         self.__new_target_received = False
-        self.__rh_help = False
         self.__restoking = False
         self.__is_anchor_set = False
+
         self.ANCHOR_ID = anchor_id
+
+        if task:
+            self.__restoking_id = 28
+        else:
+            self.__restoking_id = 10
 
         # Create dictionary to store position of detected markers
         self.__detected_markers_world = {}
@@ -111,6 +119,11 @@ class ObjectTracker:
             Empty,
         )
 
+        self.__record_failure = rospy.ServiceProxy(
+            '/record_failure',
+            Empty,
+        )
+
         self.__remote_handling = rospy.ServiceProxy(
             '/remote_handling',
             SetBool,
@@ -141,6 +154,16 @@ class ObjectTracker:
             SendFloat32MultiArray,
         )
 
+        self.__assign_failure_service = rospy.ServiceProxy(
+            '/assign_failure',
+            ReceiveInt,
+        )
+
+        self.__failure_resolved_service = rospy.ServiceProxy(
+            '/failure_resolved',
+            Empty,
+        )
+
         # # Topic publisher:
         self.__target_camera_pub = rospy.Publisher(
             '/my_gen3/target_workspace_cam',
@@ -154,9 +177,15 @@ class ObjectTracker:
             queue_size=1,
         )
 
-        self.__user_control = rospy.Publisher(
-            '/user_control',
+        self.__error_pub = rospy.Publisher(
+            '/object_tracker/error_code',
             Int32,
+            queue_size=1,
+        )
+
+        self.__restocking_pub = rospy.Publisher(
+            '/object_tracker/restocking',
+            Bool,
             queue_size=1,
         )
 
@@ -173,11 +202,6 @@ class ObjectTracker:
             self.__image_callback,
         ),
 
-        rospy.Subscriber(
-            '/rh_help',
-            Bool,
-            self.__remote_help_callback,
-        ),
         rospy.Subscriber(
             '/chest_cam/camera/aligned_depth_to_color/image_raw',
             Image,
@@ -210,10 +234,6 @@ class ObjectTracker:
         if self.__is_tracking and not self.__restoking:
             self.__detect_and_store()
 
-    def __remote_help_callback(self, message):
-
-        self.__rh_help = message.data
-
     def __target_identifier_callback(self, message):
 
         self.__marker_id = message.id
@@ -221,7 +241,7 @@ class ObjectTracker:
 
         if self.__marker_id != self.__previous_marker_id:
 
-            if self.__marker_id == 4:
+            if self.__marker_id == self.__restoking_id:
                 self.__restoking = True
 
                 # Empty all previously collected target poses
@@ -234,8 +254,9 @@ class ObjectTracker:
     def __resume_task_local(self, request):
 
         self.__robot_state = 0
-        self.__update_target_service()
-        self.__user = 0
+        self.__failure_resolved_service()
+
+        self.__assign_to = 0
 
         return []
 
@@ -250,21 +271,19 @@ class ObjectTracker:
             self.__update_target_service()
             self.__remote_help_service(0)
 
-        self.__user = 0
-
         return True
 
     def __grasp_failure(self, request):
 
-        # assign_to = np.random.randint(1, 3)
-        assign_to = 1
+        operator_number = self.__assign_failure_service(4)
 
-        if assign_to == 1:
-            self.__remote_help_service(4)
-        elif assign_to == 2:
-            self.__local_help_service(4)
+        self.__assign_to = operator_number.response
+        self.__error_code = 4
 
-        self.__robot_state = 4
+        if self.__assign_to == 1:
+            self.__remote_help_service(self.__error_code)
+        elif self.__assign_to == 2:
+            self.__local_help_service(self.__error_code)
 
         return []
 
@@ -276,13 +295,13 @@ class ObjectTracker:
             message = "Object Tracking was resumed."
         else:
             message = "Object Tracking was paused."
+
         return [True, message]
 
     def __local_help(self, request):
 
         self.__local_help_service(request.state)
 
-        self.__user = 2
         return True
 
     def __calculate_world_position(self, request):
@@ -293,9 +312,7 @@ class ObjectTracker:
 
         center = request.center.data
 
-        # closest_marker_id = None
         closest_marker_distance = float('inf')
-        # closest_marker_corners = None
 
         corners, ids, _ = self.__ARUCO_DETECTOR.detectMarkers(self.__image)
 
@@ -386,8 +403,6 @@ class ObjectTracker:
                         # Set the depth value in the translation vector
                         tvecs[0][0][2] = depth_value_meters
 
-                # ret = rotate_marker_center(rvecs, self.__MARKER_SIZE, tvecs)
-
                 position_target = Float32MultiArray()
                 position_target.data = position_target.data = [
                     tvecs[0][0][0], tvecs[0][0][1], depth_value_meters + 0.12
@@ -430,13 +445,6 @@ class ObjectTracker:
 
                     # Convert depth value from millimeters to meters (if needed)
                     depth_value_meters = depth_value / 1000.0
-
-                    # if depth_value_meters > 0:
-                    #     # Set the depth value in the translation vector
-                    #     tvecs[0][0][2] = depth_value_meters
-
-                # ret = rotate_marker_center(rvecs, self.__MARKER_SIZE, tvecs)
-                # print(ids[i], tvecs[0][0][2], depth_value_meters)
 
                 position_target = Float32MultiArray()
                 position_target.data = [
@@ -499,24 +507,24 @@ class ObjectTracker:
 
                     self.__object_center = [0, 0]
 
-            target_position_world.x = np.round(
-                self.__detected_markers_world[self.__marker_id][0], 2
-            )
-            target_position_world.y = np.round(
-                self.__detected_markers_world[self.__marker_id][1], 2
-            )
-            target_position_world.z = np.round(
-                self.__detected_markers_world[self.__marker_id][2], 2
-            )
+            if self.__marker_id in self.__detected_markers_world:
+                target_position_world.x = np.round(
+                    self.__detected_markers_world[self.__marker_id][0], 2
+                )
+                target_position_world.y = np.round(
+                    self.__detected_markers_world[self.__marker_id][1], 2
+                )
+                target_position_world.z = np.round(
+                    self.__detected_markers_world[self.__marker_id][2], 2
+                )
 
-            center_in_frame = Float32MultiArray()
-            center_in_frame.data = self.__detected_markers_centers[
-                self.__marker_id]
-            self.__target_position_frame_pub.publish(center_in_frame)
+                center_in_frame = Float32MultiArray()
+                center_in_frame.data = self.__detected_markers_centers[
+                    self.__marker_id]
+                self.__target_position_frame_pub.publish(center_in_frame)
 
         else:
 
-            # if self.__robot_state != 0:
             target_position_world.x = 100
             target_position_world.y = 100
             target_position_world.z = 100
@@ -570,7 +578,7 @@ class ObjectTracker:
         if self.__restoking:
             # Start the timer when restocking is initiated
             if not hasattr(self, 'restocking_start_time'):
-                print("Start restocking!")
+                rospy.loginfo(f'\033[92mStart restocking!\033[0m',)
                 self.restocking_start_time = time.time()
                 self.last_print_time = self.restocking_start_time  # To track last time a message was printed
 
@@ -581,85 +589,83 @@ class ObjectTracker:
             # Check if 60 seconds have passed since restocking started
             if elapsed_time >= 60:
                 self.__restoking = False
-                print("Restocking finished.")
+                rospy.loginfo(f'\033[92mRestocking finished.\033[0m',)
                 del self.restocking_start_time  # Clear the timer
                 del self.last_print_time  # Clear the last print time
             else:
                 # Print the remaining time every 20 seconds
                 if time.time() - self.last_print_time >= 20:
-                    print(
-                        f"Time left for restocking: {int(remaining_time + 1)} seconds"
+                    rospy.loginfo(
+                        f'\033[93mTime left for restocking: {int(remaining_time + 1)} seconds\033[0m',
                     )
                     self.last_print_time = time.time()  # Update last print time
 
     def main_loop(self):
-
-        self.__publish_target_pose()
 
         if self.__restoking:
             self.__start_restocking()
 
         if self.__new_target_received and not self.__restoking:
 
-            # assign_to = np.random.randint(1, 3)
-            assign_to = 1
+            self.__error_code = None
 
             if self.__marker_id is not None and self.__robot_state == 0:
 
                 if self.__marker_id not in self.__detected_markers_world:
 
                     # Failure 1 - Marker not detected/misplaced
-                    self.__send_help_request(assign_to, 1)
+                    self.__error_code = 1
 
                 else:
                     if self.__is_expired():
 
                         # Failure 2 - Medicine is expired
-                        self.__send_help_request(assign_to, 2)
+                        self.__error_code = 2
 
                     elif self.__marker_id in self.__boxes:
 
-                        if assign_to == 1:
-                            self.__update_target_service()
-                            self.__user = 0
-
-                            # TO ADD - record as a failure
-                        else:
-                            # Failure 3 - Medicine is ungraspable
-                            self.__send_help_request(assign_to, 3)
+                        # Failure 3 - Medicine is ungraspable
+                        self.__error_code = 3
 
                     else:
-
                         # No failure
                         self.__change_task_state_service(0)
-                        self.__user = 0
+                        self.__error_code = 0
+
+                        self.__assign_to = 0
+
+            if self.__error_code is not None and self.__error_code != 0:
+
+                operator_number = self.__assign_failure_service(
+                    self.__error_code
+                )
+                self.__assign_to = operator_number.response
+
+                if self.__error_code == 3:
+                    if self.__assign_to == 1:
+                        self.__record_failure()
+                        self.__assign_to = 0
+
+                    else:
+                        self.__send_help_request(
+                            self.__assign_to, self.__error_code
+                        )
+                else:
+                    self.__send_help_request(
+                        self.__assign_to, self.__error_code
+                    )
 
             self.__new_target_received = False
 
-        if self.__rh_help and self.__user != 2:
-            self.__user = 1
+        self.__publish_target_pose()
 
-        user_in_charge = Int32()
-        user_in_charge.data = self.__user
-        self.__user_control.publish(user_in_charge)
+        error = Int32()
+        error.data = self.__error_code
+        self.__error_pub.publish(error)
 
-    # # Public methods:
-
-
-def rotate_marker_center(rvec, markersize, tvec=None):
-    mhalf = markersize / 2.0
-
-    # Convert rotation vector to rotation matrix, transforming from marker-world to cam-world
-    mrv, _ = cv2.Rodrigues(rvec)
-
-    # Calculate the 3D coordinates of the center in cam-world
-    center_cam_world = mhalf * mrv[:, 2]
-
-    # If tvec is given, move the center by tvec
-    if tvec is not None:
-        center_cam_world += tvec.flatten()
-
-    return center_cam_world
+        restockin_bool = Bool()
+        restockin_bool.data = self.__restoking
+        self.__restocking_pub.publish(restockin_bool)
 
 
 def main():
@@ -676,9 +682,18 @@ def main():
     # # ROS launch file parameters:
     node_name = rospy.get_name()
 
-    id = rospy.get_param(param_name=f'{rospy.get_name()}/anchor_id')
+    id = rospy.get_param(param_name=f'{rospy.get_name()}/anchor_id',)
 
-    object_tracker = ObjectTracker(node_name=node_name, anchor_id=id)
+    task = rospy.get_param(
+        param_name=f'{rospy.get_name()}/study',
+        default='false',
+    )
+
+    object_tracker = ObjectTracker(
+        node_name=node_name,
+        anchor_id=id,
+        task=task,
+    )
 
     while not rospy.is_shutdown():
         object_tracker.main_loop()
