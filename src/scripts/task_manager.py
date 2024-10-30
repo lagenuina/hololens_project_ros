@@ -132,7 +132,9 @@ class TaskStateManager:
 
                 self.__target_identifier.publish(new_target)
 
-        if self.__counter == len(self.__csv_data) and not self.__task_ended:
+        if self.__counter == (
+            len(self.__csv_data) + 1
+        ) and not self.__task_ended:
 
             self.__stop_recording()
             self.__task_ended = True

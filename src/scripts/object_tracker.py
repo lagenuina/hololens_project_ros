@@ -56,6 +56,7 @@ class ObjectTracker:
 
         self.__marker_id = None
         self.__previous_marker_id = None
+        self.__failure_sent = False
         self.__expiration = None
         self.__object_center = []
         self.__robot_state = 0  # Running
@@ -68,12 +69,14 @@ class ObjectTracker:
         self.__restoking = False
         self.__is_anchor_set = False
 
+        self.__counter_medicines = 0
+
         self.ANCHOR_ID = anchor_id
 
         if task:
             self.__restoking_id = 28
         else:
-            self.__restoking_id = 10
+            self.__restoking_id = 100
 
         # Create dictionary to store position of detected markers
         self.__detected_markers_world = {}
@@ -146,6 +149,11 @@ class ObjectTracker:
 
         self.__local_help_service = rospy.ServiceProxy(
             '/local_help_request_service',
+            UpdateState,
+        )
+
+        self.__move_chest = rospy.ServiceProxy(
+            '/move_chest',
             UpdateState,
         )
 
@@ -241,7 +249,13 @@ class ObjectTracker:
 
         if self.__marker_id != self.__previous_marker_id:
 
-            if self.__marker_id == self.__restoking_id:
+            rospy.sleep(3)
+
+            if (
+                self.__marker_id == self.__restoking_id
+            ) and self.__counter_medicines > 4:
+
+                self.__move_chest(0)
                 self.__restoking = True
 
                 # Empty all previously collected target poses
@@ -250,6 +264,9 @@ class ObjectTracker:
 
             self.__new_target_received = True
             self.__previous_marker_id = self.__marker_id
+
+            self.__failure_sent = False
+            self.__counter_medicines += 1
 
     def __resume_task_local(self, request):
 
@@ -275,15 +292,24 @@ class ObjectTracker:
 
     def __grasp_failure(self, request):
 
-        operator_number = self.__assign_failure_service(4)
+        if not self.__failure_sent:
 
-        self.__assign_to = operator_number.response
+            operator_number = self.__assign_failure_service(4)
+            self.__assign_to = operator_number.response
+
+            print("Different id!", self.__assign_to)
+            self.__failure_sent = True
+
         self.__error_code = 4
 
         if self.__assign_to == 1:
             self.__remote_help_service(self.__error_code)
         elif self.__assign_to == 2:
             self.__local_help_service(self.__error_code)
+
+        rospy.loginfo(
+            f'\033[92mFailure 4 assigned to operator {self.__assign_to}.\033[0m',
+        )
 
         return []
 
@@ -570,8 +596,9 @@ class ObjectTracker:
         elif assign_to == 2:
             self.__local_help_service(error_code)
 
-        self.__change_task_state_service(error_code)
-        self.__robot_state = error_code
+        if error_code != 3:
+            self.__change_task_state_service(error_code)
+            self.__robot_state = error_code
 
     def __start_restocking(self):
 
@@ -589,6 +616,7 @@ class ObjectTracker:
             # Check if 60 seconds have passed since restocking started
             if elapsed_time >= 60:
                 self.__restoking = False
+
                 rospy.loginfo(f'\033[92mRestocking finished.\033[0m',)
                 del self.restocking_start_time  # Clear the timer
                 del self.last_print_time  # Clear the last print time
@@ -611,7 +639,12 @@ class ObjectTracker:
 
             if self.__marker_id is not None and self.__robot_state == 0:
 
-                if self.__marker_id not in self.__detected_markers_world:
+                if self.__marker_id in self.__boxes:
+
+                    # Failure 3 - Medicine is ungraspable
+                    self.__error_code = 3
+
+                elif self.__marker_id not in self.__detected_markers_world:
 
                     # Failure 1 - Marker not detected/misplaced
                     self.__error_code = 1
@@ -621,11 +654,6 @@ class ObjectTracker:
 
                         # Failure 2 - Medicine is expired
                         self.__error_code = 2
-
-                    elif self.__marker_id in self.__boxes:
-
-                        # Failure 3 - Medicine is ungraspable
-                        self.__error_code = 3
 
                     else:
                         # No failure
@@ -641,27 +669,29 @@ class ObjectTracker:
                 )
                 self.__assign_to = operator_number.response
 
+                self.__send_help_request(
+                    self.__assign_to,
+                    self.__error_code,
+                )
+
+                rospy.loginfo(
+                    f'\033[92mFailure {self.__error_code} assigned to operator {self.__assign_to}.\033[0m',
+                )
+
                 if self.__error_code == 3:
                     if self.__assign_to == 1:
+                        rospy.sleep(5)
                         self.__record_failure()
                         self.__assign_to = 0
-
-                    else:
-                        self.__send_help_request(
-                            self.__assign_to, self.__error_code
-                        )
-                else:
-                    self.__send_help_request(
-                        self.__assign_to, self.__error_code
-                    )
 
             self.__new_target_received = False
 
         self.__publish_target_pose()
 
-        error = Int32()
-        error.data = self.__error_code
-        self.__error_pub.publish(error)
+        if self.__error_code is not None:
+            error = Int32()
+            error.data = self.__error_code
+            self.__error_pub.publish(error)
 
         restockin_bool = Bool()
         restockin_bool.data = self.__restoking
